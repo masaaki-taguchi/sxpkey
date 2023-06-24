@@ -1,0 +1,100 @@
+*
+*	ファイル関係サブルーチン 'FILE.HAS'
+*
+*	Programmed by M.Taguchi
+*
+
+	.include	doscall.mac
+
+	.xdef	FileOpen
+	.xdef	GetFileSize
+	.xdef	FileRead
+	.xdef	FileClose
+
+
+*-----------------------------------------------
+*
+*	ファイルをオープンする
+*
+*	in : a0.l = ファイル名の先頭アドレス
+*	out: d0.l = 負ならばオープン出来なかった
+*
+*-----------------------------------------------
+FileOpen:
+	clr.w	-(sp)
+	move.l	a0,-(sp)
+	DOS	_OPEN
+	addq.l	#6,sp
+	tst.l	d0
+	rts
+
+
+*------------------------------------------------
+*
+*	ファイルサイズを得る
+*
+*	in : d0.w = ファイルハンドル
+*	out: d0.l = ファイルサイズ
+*
+*-----------------------------------------------
+GetFileSize:
+	move.l	d1,-(sp)
+	move.w	d0,d1
+	move.w	#2,-(sp)
+	clr.l	-(sp)
+	move.w	d1,-(sp)
+	DOS	_SEEK
+	addq.l	#8,sp
+	move.l	d0,-(sp)
+
+	move.w	#0,-(sp)
+	clr.l	-(sp)
+	move.w	d1,-(sp)
+	DOS	_SEEK
+	addq.l	#8,sp
+	move.l	(sp)+,d0
+	move.l	(sp)+,d1
+	rts
+
+
+*-----------------------------------------------
+*
+*	ファイルを読み込む
+*
+*	in : d0.w = ファイルハンドル
+*	in : d1.l = ファイルサイズ
+*	in : d2.l = ファイル読み込み先アドレス
+*	out: d0.l = ファイルサイズ
+*
+*-----------------------------------------------
+FileRead:
+	move.l	d1,d3
+	move.l	d1,-(sp)
+	move.l	d2,-(sp)
+	move.w	d0,-(sp)
+	DOS	_READ
+	lea.l	10(sp),sp
+	moveq.l	#0,d2
+	cmp.l	d0,d1
+	beq	@f
+	moveq.l	#-1,d2
+@@:	move.l	d2,d0
+	tst.l	d0
+	rts
+
+
+*-----------------------------------------------
+*
+*	ファイルをクローズする
+*
+*	in : d0.w = ファイルハンドル
+*
+*-----------------------------------------------
+FileClose:
+	move.w	d0,-(sp)
+	DOS	_CLOSE
+	addq.l	#2,sp
+	rts
+
+
+

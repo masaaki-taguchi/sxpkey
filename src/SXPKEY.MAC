@@ -1,0 +1,132 @@
+*
+*	SXPKEY.R 共通定義ファイル 'SXPKEY.MAC'
+*
+*	Programmed by M.Taguchi
+*
+
+ERROR	.macro	STRPTR
+	pea.l	STRPTR(pc)
+	move.w	#%00000001_00000001,-(sp)
+	SX	__DMError
+	addq.l	#6,sp
+	.endm
+
+GPRINT	.macro	X,Y,STR
+	move.l	#X<<16+Y,-(sp)
+	SX	__GMMove
+	addq.l	#4,sp
+	pea.l	STR(pc)
+	SX	__GMDrawStrZ
+	addq.l	#4,sp
+	.endm
+
+LASCII	.macro	STR
+	.local	top,end
+	dc.b	end-top
+top:	dc.b	STR
+end:
+	.endm
+
+STACKSIZE	=	2*1024		*スタックサイズ
+EVENTMASK	=	$ffff
+WIN_OPT		=	%0000
+WIN_X		=	464
+WIN_Y		=	80
+ICON_X		=	128
+ICON_Y		=	32
+
+DEF_PCMSIZE	=	7800		*15.6KHzで1秒分
+DEF_KENBANPOS	=	24
+DEF_KENBANPUT	=	1
+DEF_RAS68KEXT	=	0
+
+*	ワークの内容の定義
+
+	.offset	0
+A0Work:			ds.l	1	*起動時のa0アドレスを保存するワーク
+CommandLine:		ds.l	1	*コマンドラインのアドレスを保存するワーク
+CommandLine2:		ds.l	1
+EnvPoint:		ds.l	1	*環境アドレスを保存するワーク
+
+* タスクマネージャ関係のワーク
+TaskID:			ds.l	1	*タスクIDを保存するワーク
+TaskRecordBuffer:	ds.b	512
+
+* イベントマネージャ関係のワーク
+EventRecord:
+EventRecordWhat:	ds.w	1	*イベントレコード
+EventRecordWhom1:	ds.l	1	*第1引数
+EventRecordWhen:	ds.l	1	*イベント発生時間
+EventRecordWhom2:	ds.l	1	*第2引数
+EventRecordWhat2:	ds.w	1	*ダスクマネージャーイベントの種類
+EventRecordTaskID:	ds.w	1	*送り手のタスクID
+
+* アプリ終了フラグ
+ExitFlag:		ds.w	1
+
+* ウインドウ関係のワーク
+WindowRect:		ds.l	2	*ウインドウレクタングルレコード
+WindowRecord:		ds.b	$72	*ウインドウレコードを作成する場所
+WindowActive:		ds.w	1	*アクティブフラグ
+MenuHandle:		ds.l	1
+MenuHandle2:		ds.l	1
+DialogHandle:		ds.l	1
+OldCurResource:		ds.l	1
+NewCurResource:		ds.l	1
+
+* アイコン化したときに使用するワーク
+OldMouseLDownTime:	ds.l	1
+NewMouseLDownTime:	ds.l	1
+OldWindowX:		ds.w	1
+OldWindowY:		ds.w	1
+OldIconX:		ds.w	1
+OldIconY:		ds.w	1
+IconRgnHandle:		ds.l	1
+IconFlag:		ds.w	1
+Icon1stFlag:		ds.w	1
+Window1stFlag:		ds.w	1
+
+* ファイル読み込み関係ワーク
+FileHandle:		ds.w	1
+FileSize:		ds.w	1
+TaskPathBuffer:		ds.b	90	*自分のタスクのパスバッファ
+SearchPathBuffer:	ds.b	90
+ReadPcmSize:		ds.l	1
+AdpcmNameFlag:		ds.w	1
+AdpcmNameBuffer:	ds.b	256
+
+* ADPCM変換関係で使用するワーク
+AdpcmSize:		ds.l	1
+AdpcmPointHandle:	ds.l	1
+PcmSize:		ds.l	1
+PcmPointHandle:		ds.l	1
+PcmSize2:		ds.l	1
+PcmPointHandle2:	ds.l	1
+AdpcmTableFlag:		ds.w	1
+AdpcmTableHandle:	ds.l	1
+AdpcmSizeTable:		ds.l	49*2
+
+* ras68k-ext関連のワーク
+PilibFlag:		ds.w	1
+Ras68kExtFlag:		ds.w	1
+CurrentPcmChannel:	ds.w	1
+
+* 鍵盤関係のワーク
+KeyMapBuffer:		ds.b	128
+KenbanPositionWork:	ds.w	1
+KenbanKeyBuffer:	ds.b	$29-$11+1
+			.even
+KenbanDrawFlag:		ds.w	1
+KenbanRect:		ds.w	4
+
+* PCM8の常駐フラグ
+Pcm8Flag:		ds.w	1
+
+* その他のバッファ
+WordBuffer:		ds.b	16		*数値変換用バッファ
+EtcBuffer:		ds.b	256		*汎用バッファ
+
+WORKSIZE:
+	.text
+
+

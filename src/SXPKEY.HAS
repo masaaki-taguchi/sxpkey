@@ -1,0 +1,1976 @@
+*
+*	ADPCM音源キーボード 'SXPKEY.R' version 0.04
+*
+*	Programmed by M.Taguchi
+*
+
+	.include	iocscall.mac
+	.include	doscall.mac
+	.include	sxcall.mac
+	.include	sxpkey.mac
+
+	.xref	AdpcmToPcm
+	.xref	PcmToAdpcm
+	.xref	GetAdpcmSize
+	.xref	PitchChange
+	.xref	FileOpen
+	.xref	GetFileSize
+	.xref	FileRead
+	.xref	FileClose
+
+
+*-----------------------------------------------
+*
+*	モジュールヘッダ
+*
+*-----------------------------------------------
+ModuleHeader:
+	dc.l	'OBJR'			*R型モジュール
+	dc.l	0			*プログラムエリアのサイズ
+	dc.l	SXEntry-ModuleHeader	*スタートアドレスオフセット
+	dc.l	WORKSIZE+STACKSIZE	*ワークエリアのサイズ
+	dc.l	0,0,0,0			*システム予約
+
+
+*-----------------------------------------------
+*
+*	コマンドラインから起動した場合
+*
+*-----------------------------------------------
+HumanEntry:
+.ifdef	NDEBUG
+	pea.l	HumanEntryStr(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	DOS	_EXIT
+
+HumanEntryStr:
+	dc.b	'SX-SHELL上で起動してください',13,10,0
+	.even
+
+.else
+	lea.l	StackTop(pc),sp
+
+	lea.l	$10(a0),a0
+	suba.l	a0,a1
+	move.l	a1,-(sp)
+	move.l	a0,-(sp)
+	DOS	_SETBLOCK		*最小限のメモリ確保
+	addq.l	#8,sp
+
+	clr.l	-(sp)			*自分と同じ環境
+	pea.l	ExecCommandBuffer(pc)
+	pea.l	SXKernelName(pc)
+	move.w	#2,-(sp)		*PATHセット
+	DOS	_EXEC
+	lea.l	14(sp),sp
+	tst.l	d0
+	bmi	ErrorKernel
+
+	clr.l	-(sp)
+	pea.l	ExecCommandBuffer(pc)
+	pea.l	SXKernelName(pc)
+	clr.w	-(sp)
+	DOS	_EXEC
+	lea.l	14(sp),sp
+	tst.l	d0
+	bmi	ErrorKernel
+
+	DOS	_EXIT
+
+ErrorKernel:
+	pea.l	ErrorKernelStr(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	move.w	#-1,-(sp)
+	DOS	_EXIT2
+
+ErrorKernelStr:
+	dc.b	'カーネルが起動できませんでした',13,10,0
+SXKernelName:
+	dc.b	'SXKERNEL.X -K -R1 -L0',0
+	ds.b	90
+	.even
+ExecCommandBuffer:
+	ds.b	256
+
+	ds.b	64
+StackTop:
+
+
+.endif
+*-----------------------------------------------
+*
+*	SX-SHELLから起動した場合
+*
+*-----------------------------------------------
+SXEntry:
+	movea.l	a1,a5
+	bsr	Initialize		*アプリケーションの初期化
+	bpl	MainLoop
+	move.w	#-1,-(sp)		*初期化時にエラーがあれば終了
+	SX	__TSExit
+
+
+*-----------------------------------------------
+*
+*	メインループ
+*
+*-----------------------------------------------
+MainLoop:
+	pea.l	EventRecord(a5)		*メインループ
+	move.w	#EVENTMASK,-(sp)
+	SX	__TSEventAvail		*イベントを得る
+	addq.l	#6,sp
+	move.w	EventRecordWhat(a5),d0
+	andi.w	#$000f,d0
+	add.w	d0,d0
+	lea.l	EventTable(pc),a0
+	move.w	(a0,d0.w),d0
+	jsr	(a0,d0.w)		*イベントコードによって分岐
+
+	tst.b	ExitFlag(a5)
+	beq	MainLoop
+
+
+*-----------------------------------------------
+*
+*	SXPKETの終了処理
+*
+*-----------------------------------------------
+SXExit:
+	move.l	MenuHandle(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+	move.l	MenuHandle2(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+
+	move.l	NewCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+	SX	__RMResRemove
+	move.l	OldCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+
+	bsr	MFreeAdpcmTable
+
+	pea.l	WindowRecord(a5)
+	SX	__WMClose
+	addq.l	#4,sp
+	clr.w	-(sp)
+	SX	__TSExit
+
+
+*-----------------------------------------------
+*
+*	イベントジャンプテーブル
+*
+*-----------------------------------------------
+EventTable:
+@@:	dc.w	IdleEvent-@b		*アイドルイベント
+	dc.w	MouseLDownEvent-@b	*レフトダウンイベント
+	dc.w	DummyEvent-@b
+	dc.w	MouseRDownEvent-@b	*ライトダウンイベント
+	dc.w	DummyEvent-@b
+	dc.w	KeyDownEvent-@b		*キーダウンイベント
+	dc.w	DummyEvent-@b
+	dc.w	UpdateEvent-@b		*アップデートイベント
+	dc.w	DummyEvent-@b
+	dc.w	ActivateEvent-@b	*アクティベイトイベント
+	dc.w	DummyEvent-@b
+	dc.w	DummyEvent-@b
+	dc.w	System1Event-@b		*システムイベント#1
+	dc.w	System2Event-@b		*システムイベント#2
+	dc.w	System3Event-@b		*システムイベント#3
+	dc.w	System4Event-@b		*システムイベント#4
+
+DummyEvent:
+	rts
+
+
+*-----------------------------------------------
+*
+*	アイドルイベント
+*
+*-----------------------------------------------
+IdleEvent:
+IdleEventExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	レフトダウンイベント
+*
+*-----------------------------------------------
+MouseLDownEvent:
+	move.l	EventRecordWhom1(a5),a0
+	lea.l	WindowRecord(a5),a2
+	cmpa.l	a2,a0
+	bne	MouseLDownExit
+
+	tst.b	WindowActive(a5)
+	bne	@f
+	pea.l	(a2)
+	SX	__WMSelect
+	addq.l	#4,sp
+	bra	MouseLDownExit
+
+@@:	tst.w	IconFlag(a5)
+	bne	IconMouseLDown
+	pea.l	EventRecord(a5)
+	pea.l	(a2)
+	SX	__SXCallWindM
+	addq.l	#8,sp
+	tst.l	d0
+	beq	MouseLDownExit
+
+	cmpi.w	#3,d0
+	beq	WindowInside
+	cmpi.w	#4,d0
+	beq	WindowRegion
+	cmpi.w	#7,d0
+	beq	CloseButton
+
+MouseLDownExit:
+	rts
+
+WindowInside:
+	tst.w	AdpcmTableFlag(a5)	*ADPCMがセットしてあるか?
+	beq	WindowInsideExit
+
+	move.l	EventRecordWhom2(a5),-(sp)
+	SX	__GMGlobalToLocal
+	addq.l	#4,sp
+	move.w	d0,d2
+	swap.w	d0
+	move.w	d0,d1
+
+	cmpi.w	#448,d1			*ここだけ特別扱い
+	blt	@f
+	cmpi.w	#0,d2
+	blt	@f
+	cmpi.w	#448+16-1,d1
+	bgt	@f
+	cmpi.w	#0+80-1,d2
+	bgt	@f
+	moveq.l	#49-1,d0
+	bsr	RingAdpcm
+	moveq.l	#1,d1
+	bsr	DrawKenban
+	bsr	WaitMouseLButton
+	moveq.l	#0,d1
+	bsr	DrawKenban
+	bra	WindowInsideExit
+
+@@:	cmpi.w	#112,d1
+	bcc	@f
+	moveq.l	#0,d3
+	bra	CalcKenbanBlock
+@@:	cmpi.w	#224,d1
+	bcc	@f
+	moveq.l	#1,d3
+	bra	CalcKenbanBlock
+@@:	cmpi.w	#336,d1
+	bcc	@f
+	moveq.l	#2,d3
+	bra	CalcKenbanBlock
+@@:	moveq.l	#3,d3
+
+CalcKenbanBlock:
+	move.w	#112,d4
+	mulu.w	d3,d4
+
+	move.w	d3,d5			*12倍
+	lsl.w	#3,d3
+	add.w	d5,d5
+	add.w	d5,d5
+	add.w	d5,d3
+
+	lea.l	KenbanXYTable(pc),a0
+	moveq.l	#12-1,d0
+KenbanXYCheckLoop:
+	move.w	(a0),d5
+	add.w	d4,d5
+	cmp.w	d5,d1
+	blt	@f
+	cmp.w	2(a0),d2
+	blt	@f
+	move.w	4(a0),d5
+	add.w	d4,d5
+	cmp.w	d5,d1
+	bgt	@f
+	cmp.w	6(a0),d2
+	bgt	@f
+	move.w	8(a0),d0
+	add.w	d3,d0
+	bsr	RingAdpcm
+	moveq.l	#1,d1
+	bsr	DrawKenban
+	bsr	WaitMouseLButton
+	moveq.l	#0,d1
+	bsr	DrawKenban
+	bra	WindowInsideExit
+@@:	lea.l	10(a0),a0
+	dbra	d0,KenbanXYCheckLoop
+WindowInsideExit:
+	rts
+
+KenbanXYTable:
+	dc.w	9,0,9+11-1,0+50-1,1
+	dc.w	28,0,28+11-1,0+50-1,3
+	dc.w	56,0,56+11-1,0+50-1,6
+	dc.w	74,0,74+11-1,0+50-1,8
+	dc.w	93,0,93+11-1,0+50-1,10
+	dc.w	0,0,0+16-1,80-1,0
+	dc.w	16,0,16+16-1,80-1,2
+	dc.w	32,0,32+16-1,80-1,4
+	dc.w	48,0,48+16-1,80-1,5
+	dc.w	64,0,64+16-1,80-1,7
+	dc.w	80,0,80+16-1,80-1,9
+	dc.w	96,0,96+16-1,80-1,11
+
+WindowRegion:
+	bsr	DoubleClickCheck
+	beq	@f
+	bsr	ChangeWindow
+@@:	rts
+
+CloseButton:
+	st.b	ExitFlag(a5)
+	rts
+
+IconMouseLDown:
+	bsr	DoubleClickCheck
+	beq	@f
+	bsr	ChangeWindow
+	bra	IconMouseLDownExit
+
+@@:	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+
+	SX	__GMNewRgn
+	move.l	a0,IconRgnHandle(a5)
+	move.l	WindowRecord+$48(a5),-(sp)
+	move.l	a0,-(sp)
+	SX	__GMCopyRgn
+	addq.l	#8,sp
+
+	lea.l	EtcBuffer(a5),a0
+	move.w	#-1024,(a0)+
+	move.w	#-1024,(a0)+
+	move.w	#1024,(a0)+
+	move.w	#1024,(a0)+
+
+	clr.l	-(sp)
+	move.w	#%11,-(sp)
+	pea.l	EtcBuffer(a5)
+	pea.l	EtcBuffer(a5)
+	move.l	EventRecordWhom2(a5),-(sp)
+	move.l	IconRgnHandle(a5),-(sp)
+	SX	__WMDragRgn
+	lea.l	22(sp),sp
+	tst.l	d0
+	beq	IconMouseLDownExit	*移動しなかった
+	move.l	d0,d1
+	move.l	IconRgnHandle(a5),-(sp)
+	SX	__GMDisposeRgn
+	addq.l	#4,sp
+
+	clr.l	-(sp)
+	SX	__GMLocalToGlobal
+	addq.l	#4,sp
+	add.w	d0,d0			*何故2倍するかは謎
+	add.w	d1,d0
+	swap.w	d1
+	swap.w	d0
+	add.w	d0,d0
+	add.w	d1,d0
+	swap.w	d0
+	clr.w	-(sp)
+	move.l	d0,-(sp)
+	pea.l	WindowRecord(a5)
+	SX	__WMMove
+	lea.l	10(sp),sp
+
+IconMouseLDownExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	ダブルクリックされたか調べる
+*
+*	out: d0.l = 0以外ならダブルクリックされた
+*
+*-----------------------------------------------
+DoubleClickCheck:
+	movem.l	d1/a0,-(sp)
+	move.l	EventRecordWhen(a5),d1
+	move.l	d1,NewMouseLDownTime(a5)
+	move.l	OldMouseLDownTime(a5),d0
+	move.l	d1,OldMouseLDownTime(a5)
+	sub.l	d0,d1
+	SX	__EMDClickGet
+	cmp.l	d1,d0
+	bcs	@f
+	clr.l	OldMouseLDownTime(a5)
+	moveq.l	#1,d0
+	bra	DoubleClickCheckExit
+@@:	moveq.l	#0,d0
+DoubleClickCheckExit:
+	movem.l	(sp)+,d1/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	マウスの左ボタンが離されるまで待つ
+*
+*-----------------------------------------------
+WaitMouseLButton:
+	movem.l	d0/a0,-(sp)
+@@:	SX	__EMLStill
+	tst.l	d0
+	bne	@b
+	movem.l	(sp)+,d0/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	ライトダウンイベント
+*
+*-----------------------------------------------
+MouseRDownEvent:
+	move.l	EventRecordWhom1(a5),a0
+	lea.l	WindowRecord(a5),a2
+	cmp.l	a2,a0
+	bne	MouseRDownEventExit
+
+	move.l	MenuHandle(a5),a1
+	tst.w	IconFlag(a5)
+	beq	@f
+	move.l	MenuHandle2(a5),a1
+
+@@:	movea.l	a1,a0
+	move.l	(a0),a0
+	moveq.l	#4,d0
+	bsr	GetCheckAddress
+	move.b	KenbanDrawFlag(a5),(a0)	*チェックマークの書き換え
+
+	movea.l	a1,a0
+	move.l	(a0),a0
+	moveq.l	#5,d0
+	bsr	GetCheckAddress
+	move.b	Ras68kExtFlag(a5),(a0)
+
+	move.l	EventRecord+10(a5),-(sp)
+	move.l	a1,-(sp)
+	SX	__MNSelect		*メニューを出す
+	addq.l	#8,sp
+
+	move.w	d0,d1
+	add.w	d1,d1
+	move.w	MenuJumpTable(pc,d1.w),d1
+	jsr	MenuJumpTable(pc,d1.w)
+
+MouseRDownEventExit:
+	rts
+
+MenuJumpTable:
+@@:	dc.w	MouseRDownEventExit-@b
+	dc.w	PutDialog-@b
+	dc.w	ChangeWindow-@b
+	dc.w	MouseRDownEventExit-@b
+	dc.w	ChangeKenban-@b
+	dc.w	ChangeRas68kExt-@b
+	dc.w	MouseRDownEventExit-@b
+	dc.w	ApplicationExit-@b
+
+PutDialog:
+	move.l	#-1,-(sp)
+	clr.l	-(sp)
+	move.w	#-4096,-(sp)
+	SX	__DMRefer		*ダイヤログを出す
+	lea	10(sp),sp
+	move.l	a0,DialogHandle(a5)
+
+	move.l	a0,-(sp)		*ダイヤログの中を描く
+	SX	__GMSetGraph
+	addq.l	#4,sp
+	move.w	#%0111,-(sp)
+	SX	__GMAPage
+	addq.l	#2,sp
+	move.w	#11,-(sp)
+	SX	__GMForeColor
+	addq.l	#2,sp
+	clr.w	-(sp)
+	SX	__GMPenMode
+	addq.l	#2,sp
+	move.w	#0,-(sp)
+	SX	__GMFontMode
+	addq.l	#2,sp
+
+	move.l	#$0040_0004,-(sp)
+	pea.l	DialogTitle(pc)
+	SX	__GMShadowStrZ
+	addq.l	#8,sp
+
+	GPRINT	24,32,DialogStr0
+	GPRINT	24,52,DialogStr1
+	GPRINT	96,64,DialogStr2
+	GPRINT	24,84,DialogStr3
+
+	clr.l	-(sp)
+	SX	__DMControl		*コントロールを待つ
+	addq.l	#4,sp
+	move.l	DialogHandle(a5),-(sp)
+	SX	__DMDispose		*ダイヤログを消す
+	addq.l	#4,sp
+	rts
+
+ChangeKenban:
+	tst.w	KenbanDrawFlag(a5)
+	seq.b	KenbanDrawFlag(a5)
+	rts
+
+ChangeRas68kExt:
+	tst.w	Ras68kExtFlag(a5)
+	seq.b	Ras68kExtFlag(a5)
+	tst.w	Ras68kExtFlag(a5)
+	beq	ChangeRas68kExtExit
+	bsr	PilibCheck
+	tst.w	PilibFlag(a5)
+	bne	@f
+	sf.b	Ras68kExtFlag(a5)
+	ERROR	ErrorStrPilibProcess
+	bra	ChangeRas68kExtExit
+@@:	tst.w	AdpcmTableFlag(a5)
+	beq	ChangeRas68kExtExit
+	bsr	Ras68kExtUploadMemory
+ChangeRas68kExtExit:
+	rts
+
+ApplicationExit:
+	st.b	ExitFlag(a5)
+	rts
+
+
+*-----------------------------------------------
+*
+*	キーダウンイベント
+*
+*-----------------------------------------------
+KeyDownEvent:
+	tst.b	WindowActive(a5)
+	beq	KeyDownEventExit
+
+	SX	__KBCurKbrGet
+	move.l	d0,-(sp)
+	SX	__KBShiftGet
+	addq.l	#4,sp
+
+	btst.l	#2,d0			*OPT1は押されているか?
+	beq	CheckCursorKey
+	move.w	EventRecordWhom1(a5),d0
+	cmpi.w	#$11,d0
+	bne	@f
+	st.b	ExitFlag(a5)
+	bra	KeyDownEventExit
+@@:	cmpi.w	#$25,d0
+	bne	KeyDownEventExit
+	tst.w	KenbanDrawFlag(a5)
+	seq.b	KenbanDrawFlag(a5)
+
+KeyDownEventExit:
+	rts
+
+CheckCursorKey:
+	tst.w	IconFlag(a5)
+	bne	KeyDownEventExit
+	tst.w	AdpcmTableFlag(a5)
+	beq	KeyDownEventExit
+
+	move.w	EventRecordWhom1(a5),d0
+	cmpi.w	#$3b,d0
+	beq	KenbanPositonChange1
+	cmpi.w	#$3d,d0
+	beq	KenbanPositonChange2
+	bra	CheckKenbanKey
+KenbanPositonChange1:
+	tst.w	KenbanPositionWork(a5)
+	beq	CheckKenbanKey
+	subi.w	#12,KenbanPositionWork(a5)
+	bra	CheckKenbanKey
+KenbanPositonChange2:
+	cmpi.w	#36,KenbanPositionWork(a5)
+	beq	CheckKenbanKey
+	addi.w	#12,KenbanPositionWork(a5)
+
+CheckKenbanKey:
+	pea.l	KeyMapBuffer(a5)
+	SX	__EMKMapGet
+	addq.l	#4,sp
+	lea.l	KeyMapBuffer(a5),a0
+	lea.l	KenbanKeyTable(pc),a1
+	lea.l	KenbanKeyBuffer(a5),a2
+CheckKenbanKeyLoop:
+	tst.b	(a1)			*-1ならキーテーブル終わり
+	bmi	CheckKenbanKeyEnd
+	move.b	(a1),d0
+	ext.w	d0
+	tst.b	(a0,d0.w)
+	beq	@f
+	subi.b	#$11,d0
+	tst.b	(a2,d0.w)
+	bne	NextCheckKenbanKey
+	st.b	(a2,d0.w)
+	move.b	1(a1),d0
+	ext.w	d0
+	add.w	KenbanPositionWork(a5),d0
+	bsr	RingAdpcm
+	moveq.l	#1,d1
+	bsr	DrawKenban
+	bra	NextCheckKenbanKey
+@@:	subi.b	#$11,d0			*キーが押されていなかった
+	tst.b	(a2,d0.w)
+	beq	NextCheckKenbanKey
+	sf.b	(a2,d0.w)
+	move.b	1(a1),d0
+	ext.w	d0
+	add.w	KenbanPositionWork(a5),d0
+	moveq.l	#0,d1
+	bsr	DrawKenban
+NextCheckKenbanKey:
+	addq.l	#2,a1
+	bra	CheckKenbanKeyLoop
+CheckKenbanKeyEnd:
+	lea.l	KenbanKeyBuffer(a5),a0
+	moveq.l	#$29-$11,d0
+@@:	tst.b	(a0)+			*まだ押されているキーがあるか調べる
+	dbne	d0,@b
+	beq	KeyDownEventExit
+	pea.l	KeyMapBuffer(a5)
+	SX	__EMKMapGet
+	addq.l	#4,sp
+	lea.l	KeyMapBuffer(a5),a0
+	lea.l	KenbanKeyTable(pc),a1
+	lea.l	KenbanKeyBuffer(a5),a2
+	bra	CheckKenbanKeyLoop
+
+KenbanKeyTable:
+	dc.b	$11,-4			*'Q'
+	dc.b	$12,-2			*'W'
+	dc.b	$14,1			*'R'
+	dc.b	$15,3			*'T'
+	dc.b	$17,6			*'U'
+	dc.b	$18,8			*'I'
+	dc.b	$19,10			*'O'
+	dc.b	$1b,13			*'@'
+	dc.b	$1c,15			*'['
+
+	dc.b	$1e,-3			*'A'
+	dc.b	$1f,-1			*'S'
+	dc.b	$20,0			*'D'
+	dc.b	$21,2			*'F'
+	dc.b	$22,4			*'G'
+	dc.b	$23,5			*'H'
+	dc.b	$24,7			*'J'
+	dc.b	$25,9			*'K'
+	dc.b	$26,11			*'L'
+	dc.b	$27,12			*';'
+	dc.b	$28,14			*':'
+	dc.b	$29,16			*']'
+
+	dc.b	-1
+	.even
+
+
+*-----------------------------------------------
+*
+*	アップデートイベント
+*
+*-----------------------------------------------
+UpdateEvent:
+	move.l	EventRecordWhom1(a5),a0
+	lea.l	WindowRecord(a5),a2
+	cmp.l	a2,a0
+	bne	UpdateEventExit
+
+	pea.l	WindowRecord(a5)
+	SX	__WMUpdate
+	addq.l	#4,sp
+
+	lea.l	DrawGraph(pc),a0
+	tst.w	IconFlag(a5)
+	beq	@f
+	lea.l	DrawIcon(pc),a0
+@@:	jsr	(a0)
+
+	pea.l	WindowRecord(a5)
+	SX	__WMUpdtOver
+	addq.l	#4,sp
+UpdateEventExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	アクティベイトイベント
+*
+*-----------------------------------------------
+ActivateEvent:
+	move.l	EventRecordWhom1(a5),d0
+	beq	ActivateEventExit
+	lea.l	WindowRecord(a5),a0
+	cmp.l	a0,d0
+	seq.b	WindowActive(a5)
+
+ActivateEventExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	システムイベント #1 #2
+*
+*-----------------------------------------------
+System1Event:
+System2Event:
+	move.w	EventRecordWhat2(a5),d0
+	cmpi.w	#1,d0
+	beq	AllClose
+	cmpi.w	#2,d0
+	beq	AllClose
+	cmpi.w	#31,d0
+	beq	NowEnvSave
+	cmpi.w	#32,d0
+	beq	WindowSelect
+	cmpi.w	#80,d0
+	beq	IconDragNow
+	cmpi.w	#81,d0
+	beq	IconDragEnd
+	rts
+
+AllClose:
+	st.b	ExitFlag(a5)
+	rts
+
+NowEnvSave:
+	move.w	#-1,-(sp)
+	pea.l	TaskRecordBuffer(a5)
+	SX	__TSGetTdb
+	addq.l	#6,sp
+
+	lea.l	EtcBuffer(a5),a2
+	tst.b	IconFlag(a5)
+	beq	NextWriteCommand1
+	move.b	#'-',(a2)+
+	move.b	#'i',(a2)+
+	move.b	#' ',(a2)+
+NextWriteCommand1:
+	tst.b	KenbanDrawFlag(a5)
+	bne	NextWriteCommand2
+	move.b	#'-',(a2)+
+	move.b	#'k',(a2)+
+	move.b	#' ',(a2)+
+NextWriteCommand2:
+	cmpi.l	#DEF_PCMSIZE,ReadPcmSize(a5)
+	beq	NextWriteCommand3
+	move.b	#'-',(a2)+
+	move.b	#'p',(a2)+
+	move.l	ReadPcmSize(a5),d0
+	lea.l	WordBuffer(a5),a0
+	bsr	LTOS
+	lea.l	WordBuffer(a5),a0
+@@:	cmpi.b	#' ',(a0)
+	bne	@f
+	addq.l	#1,a0
+	bra	@b
+@@:	move.b	(a0)+,(a2)+
+	bne	@b
+	subq.l	#1,a2
+	move.b	#' ',(a2)+
+NextWriteCommand3:
+	tst.b	AdpcmNameFlag(a5)
+	beq	EndWriteCommand
+	lea.l	AdpcmNameBuffer(a5),a0
+@@:	move.b	(a0)+,(a2)+
+	bne	@b
+	subq.l	#1,a2
+	move.b	#' ',(a2)+
+EndWriteCommand:
+	lea.l	EtcBuffer(a5),a0
+	cmpa.l	a0,a2
+	beq	@f
+	subq.l	#1,a2			*最後のスペースが余計なので
+@@:	clr.b	(a2)
+
+	lea.l	TaskRecordBuffer+$5a+1(a5),a1	*タスク管理テーブルのコマンドライン
+	moveq.l	#-1,d0
+@@:	addq.w	#1,d0
+	move.b	(a0)+,(a1)+
+	bne	@b
+	move.b	d0,TaskRecordBuffer+$5a(a5)
+
+	move.w	#-1,-(sp)
+	pea.l	TaskRecordBuffer(a5)
+	SX	__TSSetTdb
+	addq.l	#6,sp
+	rts
+
+WindowSelect:
+	pea.l	WindowRecord(a5)
+	SX	__WMSelect
+	addq.l	#4,sp
+	rts
+
+IconDragNow:
+	rts
+
+IconDragEnd:
+	move.l	EventRecordWhom1(a5),a0
+	lea.l	WindowRecord(a5),a2
+	cmp.l	a2,a0
+	bne	IconDragEndExit
+
+	SX	__TSGetDrag
+	tst.l	d0
+	bne	IconDragEndExit
+
+	pea.l	AdpcmNameBuffer(a5)
+	move.l	4(a0),a0
+	move.l	(a0),a0
+	addq.l	#8,a0
+	move.l	a0,-(sp)
+	SX	__TSISRecToStr
+	addq.l	#8,sp
+
+	clr.w	-(sp)
+	SX	__TSEndDrag
+	addq.l	#2,sp
+
+	st.b	AdpcmNameFlag(a5)
+	lea.l	AdpcmNameBuffer(a5),a0
+	bsr	ReadPcmFile
+	bmi	IconDragEndExit
+	bsr	MFreeAdpcmTable
+	bsr	MakeAdpcmTable
+
+IconDragEndExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	システムイベント #3
+*
+*-----------------------------------------------
+System3Event:
+	rts
+
+
+*-----------------------------------------------
+*
+*	システムイベント #4
+*
+*-----------------------------------------------
+System4Event:
+	rts
+
+
+*-----------------------------------------------
+*
+*	アプリケーションの初期化
+*
+*-----------------------------------------------
+Initialize:
+	move.l	a0,-(sp)
+	movea.l	a5,a0
+	move.w	#WORKSIZE/2-1,d0
+@@:	clr.w	(a0)+			*ワークエリアをクリア
+	dbra	d0,@b
+	move.l	(sp)+,a0
+	move.l	a0,A0Work(a5)
+
+	move.l	a2,CommandLine(a5)
+	move.l	a3,EnvPoint(a5)
+	SX	__TSGetID
+	move.l	d0,TaskID(a5)
+
+	move.w	#1,-(sp)		*argc,argvを保存
+	clr.l	-(sp)
+	pea.l	WindowRect(a5)
+	pea.l	(a2)
+	SX	__TSTakeParam		*コマンドラインを解析
+	lea.l	14(sp),sp
+	move.l	d0,d1
+	move.l	a0,CommandLine2(a5)
+
+	move.l	WindowRect(a5),d0
+	btst.l	#0,d1
+	bne	@f
+	SX	__TSGetWindowPos
+	move.l	d0,WindowRect(a5)
+	addi.l	#WIN_X<<16+WIN_Y,d0
+	move.l	d0,WindowRect+4(a5)
+	bra	MakeMenuRecord
+
+@@:	move.l	WindowRect+4(a5),d1	*-wオプションが正しかったか調べる
+	beq	@f
+	cmp.w	d0,d1
+	ble	@f
+	swap.w	d0
+	swap.w	d1
+	cmp.w	d0,d1
+	bgt	MakeMenuRecord
+	swap.w	d0
+	swap.w	d1
+@@:	addi.l	#WIN_X<<16+WIN_Y,d0
+	move.l	d0,WindowRect+4(a5)
+
+MakeMenuRecord:
+	move.w	#1,-(sp)		*メニューを作成
+	pea.l	WindowMenu(pc)
+	clr.l	-(sp)
+	SX	__MNConvert
+	lea.l	10(sp),sp
+	tst.l	d0
+	bmi	ErrorMakeMenu
+	move.l	a0,MenuHandle(a5)
+	move.l	(a0),a0
+	lea.l	MenuTitle(pc),a1
+	move.l	a1,14(a0)
+
+	move.w	#1,-(sp)
+	pea.l	WindowMenu2(pc)
+	clr.l	-(sp)
+	SX	__MNConvert
+	lea.l	10(sp),sp
+	tst.l	d0
+	bmi	ErrorMakeMenu
+	move.l	a0,MenuHandle2(a5)
+	move.l	(a0),a0
+	lea.l	MenuTitle(pc),a1
+	move.l	a1,14(a0)
+	bra	OpenResource
+ErrorMakeMenu:
+	ERROR	ErrorStrMenu
+	bra	InitializeError
+
+OpenResource:
+	lea.l	TaskPathBuffer(a5),a0
+	bsr	GetTaskPath		*自分のタスクのパスを得る
+	pea.l	TaskPathBuffer(a5)
+	pea.l	SearchPathBuffer(a5)
+	pea.l	ResourceName(pc)
+	SX	__TSSearchFile
+	lea.l	12(sp),sp
+	tst.l	d0
+	bmi	ErrorOpenResource
+	SX	__RMCurResGet
+	move.l	a0,OldCurResource(a5)
+	pea.l	SearchPathBuffer(a5)	*リソースファイルを開く
+	SX	__RMResOpen
+	addq.l	#4,sp
+	tst.l	d0
+	bmi	ErrorOpenResource2
+	move.l	a0,NewCurResource(a5)
+	SX	__RMResLoad		*リソースを全てメモリに読み込む
+	move.l	OldCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+	bra	CommandAnalyzeEntry
+ErrorOpenResource:
+	ERROR	ErrorStrResource
+	bra	InitializeError
+ErrorOpenResource2:
+	ERROR	ErrorStrResource2
+	bra	InitializeError
+
+CommandAnalyzeEntry:
+	move.l	#DEF_PCMSIZE,ReadPcmSize(a5)
+	move.w	#DEF_KENBANPOS,KenbanPositionWork(a5)
+	move.b	#DEF_KENBANPUT,KenbanDrawFlag(a5)
+	move.b	#DEF_RAS68KEXT,Ras68kExtFlag(a5)
+	move.l	CommandLine2(a5),a2
+	bsr	AnalyzeCommandLine	*コマンドライン解析の続き
+	move.l	CommandLine2(a5),-(sp)
+	SX	__MMPtrDispose
+	addq.l	#4,sp
+
+	tst.w	IconFlag(a5)
+	bne	OpenIconWindow
+OpenWindow:
+	move.l	TaskID(a5),-(sp)
+	move.w	#-1,-(sp)
+	move.l	#-1,-(sp)
+	move.w	#$20*16+WIN_OPT,-(sp)
+	move.w	#-1,-(sp)
+	pea.l	WindowTitle(pc)
+	pea.l	WindowRect(a5)
+	pea.l	WindowRecord(a5)
+	SX	__WMOpen		*ウインドウを表示
+	lea.l	26(sp),sp
+	tst.l	d0
+	bmi	ErrorOpenWindow
+
+	st.b	WindowActive(a5)
+	st.b	Window1stFlag(a5)
+	move.l	WindowRect(a5),OldWindowX(a5)
+
+	bsr	DrawGraph1st
+	bra	ReadCommandPcm
+ErrorOpenWindow:
+	ERROR	ErrorStrWindow
+	bra	InitializeError
+
+OpenIconWindow:
+	move.l	WindowRect(a5),OldIconX(a5)
+
+	lea.l	WindowRect(a5),a0
+	move.l	(a0),4(a0)
+	addi.w	#ICON_X,4(a0)
+	addi.w	#ICON_Y,6(a0)
+
+	move.l	TaskID(a5),-(sp)
+	move.w	#-1,-(sp)
+	move.l	#-1,-(sp)
+	move.w	#$24*16+WIN_OPT,-(sp)	*プレーンウインドウ
+	move.w	#-1,-(sp)
+	pea.l	WindowTitle(pc)		*表示はしない
+	pea.l	WindowRect(a5)
+	pea.l	WindowRecord(a5)
+	SX	__WMOpen
+	lea.l	26(sp),sp
+	tst.l	d0
+	bmi	ErrorOpenIconWindow
+	st.b	WindowActive(a5)
+	st.b	Icon1stFlag(a5)
+
+	bra	ReadCommandPcm
+ErrorOpenIconWindow:
+	ERROR	ErrorStrIcon
+	bra	InitializeError
+
+ReadCommandPcm:
+	tst.w	AdpcmNameFlag(a5)
+	beq	Pcm8Check
+	lea.l	DrawGraph(pc),a0
+	tst.w	IconFlag(a5)
+	beq	@f
+	lea.l	DrawIcon(pc),a0
+@@:	jsr	(a0)
+	lea.l	AdpcmNameBuffer(a5),a0
+	bsr	ReadPcmFile
+	bmi	Pcm8Check
+	bsr	MakeAdpcmTable
+
+Pcm8Check:
+	lea.l	$88.w,a1		*PCM8が常駐しているか調べる
+	IOCS	_B_LPEEK
+	subq.l	#8,d0
+	move.l	d0,a1
+	IOCS	_B_LPEEK
+	cmpi.l	#'PCM8',d0
+	bne	@f
+	st.b	Pcm8Flag(a5)
+@@:	moveq.l	#0,d0
+
+PilibCheck:
+	move.l	$1c28,a0
+@@:	move.l	$0c(a0),d0		*メモリ管理ポインタの終端まで移動
+	beq	PilibCheckLoop
+	move.l	d0,a0
+	bra	@b
+PilibCheckLoop:
+	cmpi.b	#$e0,$04(a0)		*常駐プロセスか?
+	bcs	@f
+	lea.l	PilibProcessTitle(pc),a1
+	lea.l	$100(a0),a2
+	moveq.l	#10-1,d1
+@@:	cmpm.b	(a1)+,(a2)+
+	dbne	d1,@b
+	bne	@f
+	st.b	PilibFlag(a5)		*Pilibは常駐している
+	bra	PilibCheckExit
+@@:	move.l	(a0),d0
+	beq	@f
+	move.l	d0,a0
+	bra	PilibCheckLoop
+@@:	sf.b	PilibFlag(a5)		*Pilibは常駐していない
+PilibCheckExit:
+	rts
+
+PilibProcessTitle:
+	dc.b	'PI68KEXT_',0
+	.even
+
+InitializeError:
+	moveq.l	#-1,d0
+	rts
+
+GetTaskPath:
+	move.l	a0,-(sp)
+	move.w	#-1,-(sp)
+	pea.l	TaskRecordBuffer(a5)
+	SX	__TSGetTdb
+	addq.l	#6,sp
+
+	lea.l	TaskRecordBuffer(a5),a0
+	move.l	(sp)+,a1
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+
+@@:	move.b	-(a1),d0
+	cmpi.b	#'\',d0
+	bne	@b
+	clr.b	1(a1)
+	rts
+
+AnalyzeCommandLine:
+	move.l	(a2)+,d1
+	subq.w	#1,d1
+	bmi	AnalyzeCommandLineExit
+AnalyzeCommandLoop:
+	move.l	(a2)+,a3
+	move.b	(a3)+,d0
+	cmpi.b	#'-',d0
+	beq	@f
+	cmpi.b	#'/',d0
+	beq	@f
+	subq.l	#1,a3
+	pea.l	@@f(pc)
+	bra	GetPcmFileName
+@@:	pea.l	@f(pc)
+	move.b	(a3)+,d0
+	or.b	#$20,d0
+	cmpi.b	#'i',d0
+	beq	IconFlagOn
+	cmpi.b	#'k',d0
+	beq	KenbanDrawFlagOn
+	cmpi.b	#'p',d0
+	beq	ChangeReadPcmSize
+	cmpi.b	#'r',d0
+	beq	Ras68kExtFlagOn
+	addq.l	#4,sp
+@@:	dbra	d1,AnalyzeCommandLoop
+AnalyzeCommandLineExit:
+	rts
+
+GetPcmFileName:
+	lea.l	AdpcmNameBuffer(a5),a0
+@@:	move.b	(a3)+,(a0)+
+	bne	@b
+	st.b	AdpcmNameFlag(a5)
+	rts
+
+IconFlagOn:
+	st.b	IconFlag(a5)
+	rts
+
+Ras68kExtFlagOn:
+	bsr	PilibCheck
+	tst.w	PilibFlag(a5)
+	bne	@f
+	ERROR	ErrorStrPilibProcess
+	rts
+@@:	st.b	Ras68kExtFlag(a5)
+	tst.w	AdpcmTableFlag(a5)
+	beq	@f
+	bsr	Ras68kExtUploadMemory
+@@:	rts
+
+KenbanDrawFlagOn:
+	sf.b	KenbanDrawFlag(a5)
+	rts
+
+ChangeReadPcmSize:
+	lea.l	WordBuffer(a5),a0
+	tst.b	(a3)
+	beq	ChangePcmSizeExit
+@@:	move.b	(a3)+,d0
+	beq	@f
+	cmpi.b	#'0',d0
+	bcs	ChangePcmSizeExit
+	cmpi.b	#'9',d0
+	bhi	ChangePcmSizeExit
+	move.b	d0,(a0)+
+	bra	@b
+@@:	lea.l	WordBuffer(a5),a0
+	bsr	STOL
+	move.l	d0,ReadPcmSize(a5)
+ChangePcmSizeExit:
+	rts
+
+DrawGraph1st:
+	rts
+
+DrawGraph:
+	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+
+	move.w	#$01_02,-(sp)
+	SX	__GMPenMode
+	addq.l	#2,sp
+
+	move.w	#%1111,-(sp)
+	SX	__GMAPage
+	addq.l	#2,sp
+
+	move.l	NewCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+
+	move.w	#137,-(sp)
+	move.l	#'PAT3',-(sp)
+	SX	__RMRscGet
+	addq.l	#6,sp
+	tst.l	d0
+	bmi	DrawGraphExit
+	move.l	a0,a1
+
+	moveq.l	#0,d1
+	moveq.l	#4-1,d2
+@@:	move.l	d1,-(sp)
+	move.l	(a1),-(sp)
+	SX	__GMPutRImg
+	addq.l	#8,sp
+	addi.l	#$0070_0000,d1
+	dbra	d2,@b
+
+	move.w	#135,-(sp)
+	move.l	#'PAT3',-(sp)
+	SX	__RMRscGet
+	addq.l	#6,sp
+	tst.l	d0
+	bmi	DrawGraphExit
+	move.l	a0,a1
+
+	move.l	#$01c0_0000,-(sp)
+	move.l	(a1),-(sp)
+	SX	__GMPutRImg
+	addq.l	#8,sp
+
+	move.l	OldCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+
+DrawGraphExit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	鍵盤に登録してあるADPCMを鳴らす
+*
+*	in : d0.w = 鍵盤の番号
+*
+*-----------------------------------------------
+RingAdpcm:
+	movem.l	d0-d2/a0-a1,-(sp)
+	tst.w	Pcm8Flag(a5)
+	bne	@f
+	tst.w	Ras68kExtFlag(a5)
+	bne	@f
+	move.w	d0,-(sp)
+	moveq.l	#0,d1
+	IOCS	_ADPCMMOD		*PCMを止める
+	move.w	(sp)+,d0
+@@:	cmpi.w	#49,d0
+	bcc	RingAdpcmFinish
+	lea.l	AdpcmSizeTable(a5),a0
+	lsl.w	#3,d0
+	lea.l	(a0,d0.w),a0
+	move.l	AdpcmTableHandle(a5),a1
+	adda.l	(a0)+,a1
+	move.l	(a0)+,d2
+	move.w	#$0403,d1
+
+	tst.w	Ras68kExtFlag(a5)
+	bne	@f
+	IOCS	_ADPCMOUT
+	bra	RingAdpcmFinish
+
+@@:	moveq.l	#8,d1
+	lsl.l	#8,d1
+	move.b	#$04,d1
+	lsl.l	#8,d1
+	move.b	#3,d1
+	move.l	#48000*256,d3			*周波数変更以外は影響しない認識
+	move.w	CurrentPcmChannel(a5),d0
+	swap.w	d0
+	move.w	#$000e,d0
+	trap	#5
+	tst.l	d0
+	beq	@f
+	ERROR	ErrorStrPilibFunc
+@@:	addq.w	#1,CurrentPcmChannel(a5)
+	andi.w	#$0007,CurrentPcmChannel(a5)
+RingAdpcmFinish:
+	movem.l	(sp)+,d0-d2/a0-a1
+	rts
+
+
+*-----------------------------------------------
+*
+*	鍵盤を描画
+*
+*	in : d0.w = 鍵盤の番号
+*	in : d1.w = 0ならば離、それ以外なら押
+*
+*-----------------------------------------------
+DrawKenban:
+	movem.l	d0-d4/a0-a1,-(sp)
+	cmpi.w	#49,d0
+	bcc	DrawKenbanExit
+	tst.w	KenbanDrawFlag(a5)
+	beq	DrawKenbanExit
+
+	move.w	d0,-(sp)
+	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+	move.l	NewCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+	move.w	(sp)+,d0
+
+	add.w	d0,d0
+	add.w	d0,d0
+	lea.l	DrawKenbanXYTable(pc),a0
+	lea.l	(a0,d0.w),a0
+	move.w	(a0)+,d0
+	move.w	(a0)+,d2
+
+	lea.l	KenbanRect(a5),a1		*鍵盤のレクタングルを指定
+	move.w	d0,(a1)+
+	clr.w	(a1)+
+	move.w	#16,d3
+	move.w	#80,d4
+	cmpi.w	#8,d2
+	bne	@f
+	move.w	#11,d3
+	move.w	#50,d4
+@@:	add.w	d0,d3
+	move.w	d3,(a1)+
+	move.w	d4,(a1)+
+
+	move.l	#'PAT3',d0
+	tst.w	d1
+	beq	@f
+	move.l	#'PAT4',d0
+@@:	add.w	#128,d2
+	move.w	d2,-(sp)
+	move.l	d0,-(sp)
+	SX	__RMRscGet
+	addq.l	#6,sp
+	tst.l	d0
+	bmi	DrawGraphExit
+	move.l	(a0),a0
+
+	addq.l	#8,a0
+	move.w	#$0300,-(sp)
+	pea.l	KenbanRect(a5)
+	move.l	a0,-(sp)
+	SX	__GMPlotImg
+	lea.l	10(sp),sp
+
+	move.l	OldCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+
+DrawKenbanExit:
+	movem.l	(sp)+,d0-d4/a0-a1
+	rts
+
+DrawKenbanXYTable:
+	dc.w	0+(112*0),0
+	dc.w	9+(112*0),8
+	dc.w	16+(112*0),1
+	dc.w	28+(112*0),8
+	dc.w	32+(112*0),2
+	dc.w	48+(112*0),3
+	dc.w	56+(112*0),8
+	dc.w	64+(112*0),4
+	dc.w	74+(112*0),8
+	dc.w	80+(112*0),5
+	dc.w	93+(112*0),8
+	dc.w	96+(112*0),6
+
+	dc.w	0+(112*1),0
+	dc.w	9+(112*1),8
+	dc.w	16+(112*1),1
+	dc.w	28+(112*1),8
+	dc.w	32+(112*1),2
+	dc.w	48+(112*1),3
+	dc.w	56+(112*1),8
+	dc.w	64+(112*1),4
+	dc.w	74+(112*1),8
+	dc.w	80+(112*1),5
+	dc.w	93+(112*1),8
+	dc.w	96+(112*1),6
+
+	dc.w	0+(112*2),0
+	dc.w	9+(112*2),8
+	dc.w	16+(112*2),1
+	dc.w	28+(112*2),8
+	dc.w	32+(112*2),2
+	dc.w	48+(112*2),3
+	dc.w	56+(112*2),8
+	dc.w	64+(112*2),4
+	dc.w	74+(112*2),8
+	dc.w	80+(112*2),5
+	dc.w	93+(112*2),8
+	dc.w	96+(112*2),6
+
+	dc.w	0+(112*3),0
+	dc.w	9+(112*3),8
+	dc.w	16+(112*3),1
+	dc.w	28+(112*3),8
+	dc.w	32+(112*3),2
+	dc.w	48+(112*3),3
+	dc.w	56+(112*3),8
+	dc.w	64+(112*3),4
+	dc.w	74+(112*3),8
+	dc.w	80+(112*3),5
+	dc.w	93+(112*3),8
+	dc.w	96+(112*3),6
+
+	dc.w	0+(112*4),7
+
+
+*-----------------------------------------------
+*
+*	ADPCMファイルを読み込む
+*
+*	in : a0.l = ADPCMファイルネーム
+*	out: d0.l = 負の場合エラー
+*
+*-----------------------------------------------
+ReadPcmFile:
+	movem.l	d1-d7/a0-a6,-(sp)
+	bsr	FileOpen
+	bmi	ReadPcmFileError1
+	move.w	d0,FileHandle(a5)
+	bsr	GetFileSize
+	move.l	d0,FileSize(a5)
+
+	cmp.l	ReadPcmSize(a5),d0
+	ble	@f
+	move.l	ReadPcmSize(a5),d0
+@@:	move.l	d0,AdpcmSize(a5)
+	move.l	AdpcmSize(a5),-(sp)
+	SX	__MMChHdlNew
+	addq.l	#4,sp
+	tst.l	d0
+	beq	ReadPcmFileError2
+	move.l	d0,AdpcmPointHandle(a5)
+
+	move.w	FileHandle(a5),d0
+	move.l	AdpcmSize(a5),d1
+	move.l	AdpcmPointHandle(a5),a0
+	move.l	(a0),d2
+	bsr	FileRead
+	bmi	ReadPcmFileError3
+
+	move.w	FileHandle(a5),d0
+	bsr	FileClose
+	moveq.l	#0,d0
+
+ReadPcmFileExit:
+	movem.l	(sp)+,d1-d7/a0-a6
+	rts
+
+ReadPcmFileError1:
+	ERROR	ErrorStrAdpcm
+	moveq.l	#-1,d0
+	bra	ReadPcmFileExit
+ReadPcmFileError2:
+	ERROR	ErrorStrMemory
+	moveq.l	#-2,d0
+	bra	ReadPcmFileExit
+ReadPcmFileError3:
+	ERROR	ErrorStrAdpcm2
+	move.l	AdpcmPointHandle(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+	moveq.l	#-3,d0
+	bra	ReadPcmFileExit
+
+
+*-----------------------------------------------
+*
+*	ADPCMテーブルを作成する
+*
+*	out: d0.l = 負ならばエラー
+*
+*-----------------------------------------------
+MakeAdpcmTable:
+	movem.l	d1-d7/a0-a6,-(sp)
+	clr.w	-(sp)
+	SX	__EMEnCross
+	addq.l	#2,sp
+
+	move.l	AdpcmSize(a5),d0
+	lsl.l	#2,d0
+	move.l	d0,PcmSize(a5)
+	move.l	d0,-(sp)
+	SX	__MMChHdlNew
+	addq.l	#4,sp
+	tst.l	d0
+	beq	MakeAdpcmTableError1
+	move.l	d0,PcmPointHandle(a5)
+	movea.l	d0,a1
+	move.l	(a1),a1
+
+	move.l	AdpcmSize(a5),d0
+	move.l	AdpcmPointHandle(a5),a0
+	move.l	(a0),a0
+	bsr	AdpcmToPcm
+
+	move.l	AdpcmPointHandle(a5),-(sp)	*もう必要ないから捨てる
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+
+	move.l	AdpcmSize(a5),d0
+	move.w	#-24,d1
+	move.w	#49-1,d2
+	bsr	GetAdpcmSize
+	move.l	d0,-(sp)
+	DOS	_MALLOC				*ras68k-extではMALLOCを使う必要ある？
+	addq.l	#4,sp
+	tst.l	d0
+	beq	MakeAdpcmTableError2
+	move.l	d0,AdpcmTableHandle(a5)
+	move.l	d0,a2
+
+	lea.l	AdpcmSizeTable(a5),a3
+	move.w	#-24,d1
+	moveq.l	#0,d2
+	moveq.l	#49-1,d3
+MakeAdpcmTableLoop:
+	move.l	PcmSize(a5),d0
+	move.l	PcmPointHandle(a5),a0
+	move.l	(a0),a0
+	bsr	PitchChange
+	bmi	MakeAdpcmTableError3		*メモリが足らなかった
+	move.l	d0,PcmSize2(a5)
+	move.l	a0,PcmPointHandle2(a5)
+	lsr.l	#2,d0
+	move.l	d2,(a3)+
+	add.l	d0,d2
+	move.l	d0,(a3)+
+	move.l	a2,a0
+	adda.l	d0,a2
+
+	move.l	PcmPointHandle2(a5),a1
+	move.l	(a1),a1
+	move.l	PcmSize2(a5),d0
+	bsr	PcmToAdpcm
+
+	move.l	PcmPointHandle2(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+
+	addq.w	#1,d1
+	dbra	d3,MakeAdpcmTableLoop
+
+	move.l	PcmPointHandle(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+
+	st.b	AdpcmTableFlag(a5)
+
+	moveq.l	#0,d0
+MakeAdpcmTableExit:
+	move.l	d0,-(sp)
+	SX	__EMDeCross
+	move.l	(sp)+,d0
+	tst.w	Ras68kExtFlag(a5)
+	beq	@f
+	bsr	Ras68kExtUploadMemory
+
+@@:	movem.l	(sp)+,d1-d7/a0-a6
+	rts
+
+Ras68kExtUploadMemory:
+	tst.w	PilibFlag(a5)
+	bne	@f
+	rts
+@@:	moveq.l	#0,d2
+	moveq.l	#49-1,d3
+@@:	lea.l	AdpcmSizeTable(a5),a1
+	move.w	d2,d0
+	lsl.w	#3,d0
+	lea.l	(a1,d0.w),a1
+	move.l	AdpcmTableHandle(a5),a0
+	adda.l	(a1)+,a0
+	move.l	(a1)+,d1
+	moveq.l	#$0004,d0
+	trap	#5
+	addq.w	#1,d2
+	dbra	d3,@b
+	rts
+
+MakeAdpcmTableError1:
+	ERROR	ErrorStrMemory
+	move.l	AdpcmPointHandle(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+	moveq.l	#-1,d0
+	bra	MakeAdpcmTableExit
+MakeAdpcmTableError2:
+	ERROR	ErrorStrMemory
+	move.l	PcmPointHandle(a5),-(sp)
+	SX	__MMHdlDispose
+	addq.l	#4,sp
+	moveq.l	#-2,d0
+	bra	MakeAdpcmTableExit
+MakeAdpcmTableError3:
+	ERROR	ErrorStrMemory
+	moveq.l	#-3,d0
+	bra	MakeAdpcmTableExit
+
+
+*-----------------------------------------------
+*
+*	ADPCMテーブルのメモリを解放する
+*
+*-----------------------------------------------
+MFreeAdpcmTable:
+	tst.w	AdpcmTableFlag(a5)
+	beq	@f
+	move.l	AdpcmTableHandle(a5),-(sp)	*ADPCMテーブルのメモリを解放
+*	SX	__MMHdlDispose
+	DOS	_MFREE
+	addq.l	#4,sp
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	アイコン←→ウインドウ処理
+*
+*-----------------------------------------------
+ChangeWindow:
+	lea.l	ToIcon(pc),a0
+	tst.w	IconFlag(a5)
+	beq	@f
+	lea.l	ToWindow(pc),a0
+@@:	jsr	(a0)
+	rts
+
+
+*-----------------------------------------------
+*
+*	アイコン化する
+*
+*-----------------------------------------------
+ToIcon:
+	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+
+	clr.l	-(sp)
+	SX	__GMLocalToGlobal
+	addq.l	#4,sp
+	move.l	d0,OldWindowX(a5)
+
+	pea.l	WindowRecord(a5)
+	SX	__WMClose
+	addq.l	#4,sp
+
+	lea.l	WindowRect(a5),a0
+	move.l	OldWindowX(a5),d0
+	tst.b	Icon1stFlag(a5)
+	beq	@f
+	move.l	OldIconX(a5),d0
+@@:	move.l	d0,(a0)
+	move.l	d0,4(a0)
+	addi.w	#ICON_X,4(a0)
+	addi.w	#ICON_Y,6(a0)
+
+	move.l	TaskID(a5),-(sp)
+	move.w	#-1,-(sp)
+	move.l	#-1,-(sp)
+	move.w	#$24*16+WIN_OPT,-(sp)	*プレーンウインドウ
+	move.w	#-1,-(sp)
+	pea.l	WindowTitle(pc)		*表示はしない
+	pea.l	WindowRect(a5)
+	pea.l	WindowRecord(a5)
+	SX	__WMOpen
+	lea.l	26(sp),sp
+	tst.l	d0
+	bmi	ErrorToIconSub
+
+	bsr	DrawIcon
+
+	st.b	IconFlag(a5)
+	st.b	Icon1stFlag(a5)
+	rts
+ErrorToIconSub:
+	ERROR	ErrorStrIcon
+	rts
+
+
+*-----------------------------------------------
+*
+*	アイコンを描画する
+*
+*-----------------------------------------------
+DrawIcon:
+	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+
+	move.l	NewCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+
+	move.w	#138,-(sp)
+	move.l	#'PAT3',-(sp)
+	SX	__RMRscGet
+	addq.l	#6,sp
+	tst.l	d0
+	bmi	@f
+
+	clr.l	-(sp)
+	move.l	(a0),-(sp)
+	SX	__GMPutRImg
+	addq.l	#8,sp
+
+@@:	move.l	OldCurResource(a5),-(sp)
+	SX	__RMCurResSet
+	addq.l	#4,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	ウインドウ化する
+*
+*-----------------------------------------------
+ToWindow:
+	pea.l	WindowRecord(a5)
+	SX	__GMSetGraph
+	addq.l	#4,sp
+
+	clr.l	-(sp)
+	SX	__GMLocalToGlobal
+	addq.l	#4,sp
+	move.l	d0,OldIconX(a5)
+
+	lea.l	WindowRect(a5),a0
+	move.l	OldIconX(a5),d0
+	tst.b	Window1stFlag(a5)
+	beq	@f
+	move.l	OldWindowX(a5),d0
+@@:	move.l	d0,(a0)
+	move.l	d0,4(a0)
+	addi.w	#WIN_X,4(a0)
+	addi.w	#WIN_Y,6(a0)
+
+	pea.l	WindowRecord(a5)
+	SX	__WMClose
+	addq.l	#4,sp
+
+	move.l	TaskID(a5),-(sp)
+	move.w	#-1,-(sp)
+	move.l	#-1,-(sp)
+	move.w	#$20*16+WIN_OPT,-(sp)
+	move.w	#-1,-(sp)
+	pea.l	WindowTitle(pc)
+	pea.l	WindowRect(a5)
+	pea.l	WindowRecord(a5)
+	SX	__WMOpen		*ウインドウを表示
+	lea.l	26(sp),sp
+	tst.l	d0
+	bmi	ErrorToWindowSub
+	st.b	WindowActive(a5)
+
+	sf.b	IconFlag(a5)
+	st.b	Window1stFlag(a5)
+	rts
+ErrorToWindowSub:
+	ERROR	ErrorStrWindow2
+	rts
+
+
+*-----------------------------------------------
+*
+*	チェックマークのアドレスを得る
+*
+*	in : d0.w = メニューの番号
+*	in : a0.l = メニューの先頭アドレス
+*	out: a0.l = チェックマークのあるアドレス
+*
+*-----------------------------------------------
+GetCheckAddress:
+	movem.l	d0-d2,-(sp)
+	lea.l	20(a0),a0
+	subq.w	#2,d0
+	bmi	GetCheckExit
+	moveq.l	#0,d1
+GetCheckLoop:
+	addq.l	#2,a0
+	move.b	(a0)+,d1
+	add.l	d1,a0
+	move.l	a0,d2
+	ror.w	#1,d2			*奇数アドレスか調べる
+	bcc	@f
+	addq.l	#1,a0
+@@:	dbra	d0,GetCheckLoop
+GetCheckExit:
+	addq.l	#1,a0
+	movem.l	(sp)+,d0-d2
+	rts
+
+
+*-----------------------------------------------
+*
+*	符号無し 10 進数文字列変換(long word)
+*
+*	in : d0 = 変換したい数値
+*	in : a0 = 書き込むバッファアドレス
+*
+*-----------------------------------------------
+LTOS:
+	movem.l	d1-d3/a0,-(sp)
+	lea.l	table_l(pc),a1
+	moveq.l	#9-1,d1			*loop counter
+soto_loop:
+	move.l	(a1)+,d2
+	moveq.l	#'0',d3			*character code
+naka_loop:
+	sub.l	d2,d0
+	bcs	next_column
+	addq.b	#1,d3
+	bra	naka_loop
+next_column:
+	add.l	d2,d0
+	move.b	d3,(a0)+
+	dbra	d1,soto_loop
+
+	addi.b	#'0',d0
+	move.b	d0,(a0)+		*to string buffer
+	clr.b	(a0)			*end code
+
+	lea.l	-10(a0),a0
+	moveq.l	#9-1,d2			*loop counter
+space_loop:
+	cmpi.b	#'0',(a0)
+	bne	LTOS_exit
+	move.b	#' ',(a0)+
+	dbra	d2,space_loop
+LTOS_exit:
+	movem.l	(sp)+,d1-d3/a0
+	rts
+
+table_l:
+	dc.l	1000000000
+	dc.l	100000000
+	dc.l	10000000
+	dc.l	1000000
+	dc.l	100000
+	dc.l	10000
+	dc.l	1000
+	dc.l	100
+	dc.l	10
+
+
+*-----------------------------------------------
+*
+*	10進数文字列整数変換
+*
+*	in : a0 = 変換したい文字列
+*	out: d0 = 変換された数
+*
+*-----------------------------------------------
+STOL:
+	movem.l	d1-d2/a0,-(sp)
+	moveq.l	#0,d0
+	moveq.l	#0,d1
+no_numelic:
+	move.b	(a0)+,d2
+	beq	stol_exit
+	cmpi.b	#' ',d2
+	beq	no_numelic
+	sub.b	#'0',d2
+	move.b	d2,d0
+stol_loop:
+	move.b	(a0),d2
+	beq	stol_exit
+	move.l	d0,d2
+	lsl.l	#3,d0			*8
+	add.l	d2,d2
+	add.l	d2,d0			*10
+	move.b	(a0)+,d1
+	sub.b	#'0',d1
+	add.l	d1,d0
+	bra	stol_loop
+stol_exit:
+	movem.l	(sp)+,d1-d2/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	メニューや文字列等のデータ
+*
+*-----------------------------------------------
+WindowTitle:
+	LASCII	'ADPCM音源キーボード'
+MenuTitle:
+	LASCII	'SXPKEYメニュー'
+WindowMenu:
+	dc.b	'このプログラムは…,アイコン化,~,^K!押された鍵盤を表示,^R!ras68k-extを使用,~,^Q終了',0
+WindowMenu2:
+	dc.b	'このプログラムは…,ウインドウ化,~,^K!押された鍵盤を表示,^R!ras68k-extを使用,~,^Q終了',0
+DialogTitle:
+	dc.b	'このプログラムは…',0
+DialogStr0:
+	dc.b	'SXPKEY.R version 0.04',0
+DialogStr1:
+	dc.b	'ADPCMを音源とした',0
+DialogStr2:
+	dc.b	'49鍵キーボードです',0
+DialogStr3:
+	dc.b	'Programmed by M.Taguchi',0
+ErrorStrMemory:
+	dc.b	'メモリが不足しています',0
+ErrorStrMenu:
+	dc.b	'メニューが作成できませんでした',0
+ErrorStrResource:
+	dc.b	'SXPKEY.LBが見つかりませんでした',0
+ErrorStrResource2:
+	dc.b	'リソースが開けませんでした',0
+ErrorStrWindow:
+	dc.b	'ウインドウが開けませんでした',0
+ErrorStrWindow2:
+	dc.b	'ウインドウ化に失敗しました',0
+ErrorStrIcon:
+	dc.b	'アイコン化に失敗しました',0
+ErrorStrAdpcm:
+	dc.b	'ADPCMファイルが見つかりませんでした',0
+ErrorStrAdpcm2:
+	dc.b	'ADPCMファイルの読み込みに失敗しました',0
+ErrorStrPilibFunc:
+	dc.b	'pilibのファンクション呼び出しに失敗しました',0
+ErrorStrPilibProcess:
+	dc.b	'pilibが常駐していません',0
+
+ResourceName:
+	dc.b	'SXPKEY.LB',0
+	.even
+
+ProgramEnd:
+	.end	HumanEntry
+
+
+

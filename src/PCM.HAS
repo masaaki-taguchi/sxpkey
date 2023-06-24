@@ -1,0 +1,939 @@
+*
+*	PCM関係サブルーチン 'PCM.HAS'
+*
+*	Programmed by M.Taguchi
+*
+
+	.include	sxcall.mac
+
+	.xdef	AdpcmToPcm
+	.xdef	PcmToAdpcm
+	.xdef	GetAdpcmSize
+	.xdef	PitchChange
+
+
+*-----------------------------------------------
+*
+*	ADPCMからPCMに変換
+*
+*	in : d0.l = ADPCMのサイズ
+*	in : a0.l = ADPCMのデータアドレス
+*	in : a1.l = PCMデータ格納アドレス
+*
+*-----------------------------------------------
+AdpcmToPcm:
+	movem.l	d0-d7/a0-a5,-(sp)
+	lea.l	ScaleVal(pc),a2
+	lea.l	LevenChg(pc),a3
+	lea.l	AdpcmToPcmRet1(pc),a4
+	lea.l	AdpcmToPcmRet2(pc),a5
+	moveq.l	#0,d1
+	moveq.l	#0,d2
+	moveq.l	#0,d3
+AdpcmToPcmLoop:
+	move.b	(a0)+,d4
+	move.b	d4,d5
+	andi.w	#$f,d5
+
+	move.w	d1,d6
+	add.w	d6,d6
+	move.w	(a2,d6.w),d6
+	add.w	d5,d5
+	move.w	AdpcmToPcmConvTable1(pc,d5.w),d7
+	jmp	AdpcmToPcmConvTable1(pc,d7.w)
+
+AdpcmToPcmRet1:
+	add.w	d3,d2
+	move.w	d2,d3
+
+	move.w	d2,(a1)+
+	add.w	(a3,d5.w),d1
+	bmi	@f
+	cmpi.w	#48,d1
+	bls	AdpcmToPcmHi4
+	moveq.l	#48,d1
+	bra	AdpcmToPcmHi4
+@@:	moveq.l	#0,d1
+
+AdpcmToPcmHi4:
+	lsr.b	#4,d4
+	andi.w	#$f,d4
+
+	move.w	d1,d6
+	add.w	d6,d6
+	move.w	(a2,d6.w),d6
+	add.w	d4,d4
+	move.w	AdpcmToPcmConvTable2(pc,d4.w),d5
+	jmp	AdpcmToPcmConvTable2(pc,d5.w)
+
+AdpcmToPcmRet2:
+	add.w	d3,d2
+	move.w	d2,d3
+
+	move.w	d2,(a1)+
+	add.w	(a3,d4.w),d1
+	bmi	@f
+	cmpi.w	#48,d1
+	bls	NextAdpcmToPcm
+	moveq.l	#48,d1
+	bra	NextAdpcmToPcm
+@@:	moveq.l	#0,d1
+
+NextAdpcmToPcm:
+	subq.l	#1,d0
+	bne	AdpcmToPcmLoop
+	movem.l	(sp)+,d0-d7/a0-a5
+	rts
+
+AdpcmToPcmConvTable1:
+@@:	dc.w	APConv1_00-@b
+	dc.w	APConv1_01-@b
+	dc.w	APConv1_02-@b
+	dc.w	APConv1_03-@b
+	dc.w	APConv1_04-@b
+	dc.w	APConv1_05-@b
+	dc.w	APConv1_06-@b
+	dc.w	APConv1_07-@b
+	dc.w	APConv1_08-@b
+	dc.w	APConv1_09-@b
+	dc.w	APConv1_10-@b
+	dc.w	APConv1_11-@b
+	dc.w	APConv1_12-@b
+	dc.w	APConv1_13-@b
+	dc.w	APConv1_14-@b
+	dc.w	APConv1_15-@b
+
+AdpcmToPcmConvTable2:
+@@:	dc.w	APConv2_00-@b
+	dc.w	APConv2_01-@b
+	dc.w	APConv2_02-@b
+	dc.w	APConv2_03-@b
+	dc.w	APConv2_04-@b
+	dc.w	APConv2_05-@b
+	dc.w	APConv2_06-@b
+	dc.w	APConv2_07-@b
+	dc.w	APConv2_08-@b
+	dc.w	APConv2_09-@b
+	dc.w	APConv2_10-@b
+	dc.w	APConv2_11-@b
+	dc.w	APConv2_12-@b
+	dc.w	APConv2_13-@b
+	dc.w	APConv2_14-@b
+	dc.w	APConv2_15-@b
+
+APConv1_00:
+	lsr.w	#3,d6
+	move.w	d6,d2
+	jmp	(a4)
+APConv1_01:
+	lsr.w	#2,d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_02:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_03:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_04:
+	move.w	d6,d2
+	lsr.w	#3,d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_05:
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_06:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_07:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a4)
+APConv1_08:
+	lsr.w	#3,d6
+	move.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_09:
+	lsr.w	#2,d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_10:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_11:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_12:
+	move.w	d6,d2
+	lsr.w	#3,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_13:
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_14:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+APConv1_15:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a4)
+
+APConv2_00:
+	lsr.w	#3,d6
+	move.w	d6,d2
+	jmp	(a5)
+APConv2_01:
+	lsr.w	#2,d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_02:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_03:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_04:
+	move.w	d6,d2
+	lsr.w	#3,d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_05:
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_06:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_07:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	jmp	(a5)
+APConv2_08:
+	lsr.w	#3,d6
+	move.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_09:
+	lsr.w	#2,d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_10:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_11:
+	lsr.w	d6
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_12:
+	move.w	d6,d2
+	lsr.w	#3,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_13:
+	move.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_14:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	#2,d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+APConv2_15:
+	move.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	lsr.w	d6
+	add.w	d6,d2
+	neg.w	d2
+	jmp	(a5)
+
+ScaleVal:
+	dc.w	16,17,19,21,23,25,28
+	dc.w	31,34,37,41,45,50,55
+	dc.w	60,66,73,80,88,97,107
+	dc.w	118,130,143,157,173,190,209
+	dc.w	230,253,279,307,337,371,408
+	dc.w	449,494,544,598,658,724,796
+	dc.w	876,963,1060,1166,1282,1411,1552
+LevenChg:
+	dc.w	-1,-1,-1,-1,2,4,6,8
+	dc.w	-1,-1,-1,-1,2,4,6,8
+
+
+*-----------------------------------------------
+*
+*	PCMからADPCMに変換
+*
+*	in : d0.l = PCMのサイズ
+*	in : a0.l = ADPCMデータのアドレス
+*	in : a1.l = PCMデータのアドレス
+*
+*-----------------------------------------------
+PcmToAdpcm:
+	movem.l	d0-d5/a0-a4,-(sp)
+	lsr.l	#2,d0
+	lea.l	PcmToAdpcmConvTable(pc),a2
+	move.l	a2,a3
+	moveq.l	#0,d1
+PcmToAdpcmLoop:
+	move.w	(a1)+,d2
+	sub.w	d1,d2
+	move.w	d2,d3
+	bpl	PcmToAdpcmPlus1
+	neg.w	d3
+	cmp.w	(a3)+,d3
+	bcs	@f
+	lea.l	30(a3),a3
+@@:	cmp.w	(a3)+,d3
+	bcs	@f
+	lea.l	14(a3),a3
+@@:	cmp.w	(a3)+,d3
+	bcs	@f
+	addq.l	#6,a3
+
+@@:	move.w	(a3)+,d3
+	move.w	(a3)+,d4
+	addq.b	#8,d3
+	neg.w	d4
+	add.w	d4,d1
+	movea.l	a2,a4
+	adda.w	(a3)+,a4
+
+	move.w	(a1)+,d2
+	sub.w	d1,d2
+	move.w	d2,d4
+	bpl	PcmToAdpcmMinus1Plus2
+	neg.w	d4
+	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	30(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	14(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	addq.l	#6,a4
+
+@@:	move.w	(a4)+,d4
+	move.w	(a4)+,d5
+	addq.b	#8,d4
+	neg.w	d5
+	add.w	d5,d1
+	movea.l	a2,a3
+	adda.w	(a4)+,a3
+
+	lsl.b	#4,d4
+	add.b	d3,d4
+	move.b	d4,(a0)+
+
+	subq.l	#1,d0
+	bne	PcmToAdpcmLoop
+	bra	PcmToAdpcmExit
+
+PcmToAdpcmMinus1Plus2:
+	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	30(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	14(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	addq.l	#6,a4
+
+@@:	move.w	(a4)+,d4
+	move.w	(a4)+,d5
+	add.w	d5,d1
+	movea.l	a2,a3
+	adda.w	(a4)+,a3
+
+	lsl.b	#4,d4
+	add.b	d3,d4
+	move.b	d4,(a0)+
+
+	subq.l	#1,d0
+	bne	PcmToAdpcmLoop
+	bra	PcmToAdpcmExit
+
+PcmToAdpcmPlus1:
+	cmp.w	(a3)+,d3
+	bcs	@f
+	lea.l	30(a3),a3
+@@:	cmp.w	(a3)+,d3
+	bcs	@f
+	lea.l	14(a3),a3
+@@:	cmp.w	(a3)+,d3
+	bcs	@f
+	addq.l	#6,a3
+
+@@:	move.w	(a3)+,d3
+	move.w	(a3)+,d4
+	add.w	d4,d1
+	movea.l	a2,a4
+	adda.w	(a3)+,a4
+
+	move.w	(a1)+,d2
+	sub.w	d1,d2
+	move.w	d2,d4
+	bpl	PcmToAdpcmPlus1Plus2
+	neg.w	d4
+	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	30(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	14(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	addq.l	#6,a4
+
+@@:	move.w	(a4)+,d4
+	move.w	(a4)+,d5
+	addq.b	#8,d4
+	neg.w	d5
+	add.w	d5,d1
+	movea.l	a2,a3
+	adda.w	(a4)+,a3
+
+	lsl.b	#4,d4
+	add.b	d3,d4
+	move.b	d4,(a0)+
+
+	subq.l	#1,d0
+	bne	PcmToAdpcmLoop
+	bra	PcmToAdpcmExit
+
+PcmToAdpcmPlus1Plus2:
+	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	30(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	lea.l	14(a4),a4
+@@:	cmp.w	(a4)+,d4
+	bcs	@f
+	addq.l	#6,a4
+
+@@:	move.w	(a4)+,d4
+	move.w	(a4)+,d5
+	add.w	d5,d1
+	movea.l	a2,a3
+	adda.w	(a4)+,a3
+
+	lsl.b	#4,d4
+	add.b	d3,d4
+	move.b	d4,(a0)+
+
+	subq.l	#1,d0
+	bne	PcmToAdpcmLoop
+
+PcmToAdpcmExit:
+	movem.l	(sp)+,d0-d5/a0-a4
+	rts
+
+PcmToAdpcmConvTable:
+	dc.w	$0010,$0008,$0004,$0000,$0002,$0000,$0001,$0006
+	dc.w	$0000,$000c,$0002,$000a,$0000,$0003,$000e,$0000
+	dc.w	$0018,$0014,$0004,$0012,$0080,$0005,$0016,$0100
+	dc.w	$001c,$0006,$001a,$0180,$0007,$001e,$0200,$0000
+	dc.w	$0011,$0008,$0004,$0000,$0002,$0000,$0001,$0006
+	dc.w	$0000,$000c,$0002,$000a,$0000,$0003,$000e,$0000
+	dc.w	$0019,$0015,$0004,$0013,$00c0,$0005,$0017,$0140
+	dc.w	$001d,$0006,$001b,$01c0,$0007,$001f,$0240,$0000
+	dc.w	$0013,$0009,$0004,$0000,$0002,$0040,$0001,$0007
+	dc.w	$0040,$000e,$0002,$000b,$0040,$0003,$0010,$0040
+	dc.w	$001c,$0017,$0004,$0015,$0100,$0005,$001a,$0180
+	dc.w	$0021,$0006,$001e,$0200,$0007,$0023,$0280,$0000
+	dc.w	$0015,$000a,$0005,$0000,$0002,$0080,$0001,$0007
+	dc.w	$0080,$000f,$0002,$000d,$0080,$0003,$0012,$0080
+	dc.w	$001f,$001a,$0004,$0017,$0140,$0005,$001c,$01c0
+	dc.w	$0024,$0006,$0022,$0240,$0007,$0027,$02c0,$0000
+	dc.w	$0017,$000b,$0005,$0000,$0002,$00c0,$0001,$0008
+	dc.w	$00c0,$0011,$0002,$000e,$00c0,$0003,$0014,$00c0
+	dc.w	$0022,$001c,$0004,$0019,$0180,$0005,$001f,$0200
+	dc.w	$0028,$0006,$0025,$0280,$0007,$002b,$0300,$0000
+	dc.w	$0019,$000c,$0006,$0000,$0003,$0100,$0001,$0009
+	dc.w	$0100,$0012,$0002,$000f,$0100,$0003,$0015,$0100
+	dc.w	$0025,$001f,$0004,$001c,$01c0,$0005,$0022,$0240
+	dc.w	$002b,$0006,$0028,$02c0,$0007,$002e,$0340,$0000
+	dc.w	$001c,$000e,$0007,$0000,$0003,$0140,$0001,$000a
+	dc.w	$0140,$0015,$0002,$0011,$0140,$0003,$0018,$0140
+	dc.w	$002a,$0023,$0004,$001f,$0200,$0005,$0026,$0280
+	dc.w	$0031,$0006,$002d,$0300,$0007,$0034,$0380,$0000
+	dc.w	$001f,$000f,$0007,$0000,$0003,$0180,$0001,$000b
+	dc.w	$0180,$0017,$0002,$0013,$0180,$0003,$001b,$0180
+	dc.w	$002e,$0026,$0004,$0022,$0240,$0005,$002a,$02c0
+	dc.w	$0036,$0006,$0032,$0340,$0007,$003a,$03c0,$0000
+	dc.w	$0022,$0011,$0008,$0000,$0004,$01c0,$0001,$000c
+	dc.w	$01c0,$0019,$0002,$0015,$01c0,$0003,$001d,$01c0
+	dc.w	$0033,$002a,$0004,$0026,$0280,$0005,$002e,$0300
+	dc.w	$003b,$0006,$0037,$0380,$0007,$003f,$0400,$0000
+	dc.w	$0025,$0012,$0009,$0000,$0004,$0200,$0001,$000d
+	dc.w	$0200,$001b,$0002,$0017,$0200,$0003,$0020,$0200
+	dc.w	$0037,$002e,$0004,$0029,$02c0,$0005,$0032,$0340
+	dc.w	$0040,$0006,$003c,$03c0,$0007,$0045,$0440,$0000
+	dc.w	$0029,$0014,$000a,$0000,$0005,$0240,$0001,$000f
+	dc.w	$0240,$001e,$0002,$0019,$0240,$0003,$0023,$0240
+	dc.w	$003d,$0033,$0004,$002e,$0300,$0005,$0038,$0380
+	dc.w	$0047,$0006,$0042,$0400,$0007,$004c,$0480,$0000
+	dc.w	$002d,$0016,$000b,$0000,$0005,$0280,$0001,$0010
+	dc.w	$0280,$0021,$0002,$001c,$0280,$0003,$0027,$0280
+	dc.w	$0043,$0038,$0004,$0032,$0340,$0005,$003d,$03c0
+	dc.w	$004e,$0006,$0049,$0440,$0007,$0054,$04c0,$0000
+	dc.w	$0032,$0019,$000c,$0000,$0006,$02c0,$0001,$0012
+	dc.w	$02c0,$0025,$0002,$001f,$02c0,$0003,$002b,$02c0
+	dc.w	$004b,$003e,$0004,$0038,$0380,$0005,$0044,$0400
+	dc.w	$0057,$0006,$0051,$0480,$0007,$005d,$0500,$0000
+	dc.w	$0037,$001b,$000d,$0000,$0006,$0300,$0001,$0014
+	dc.w	$0300,$0029,$0002,$0022,$0300,$0003,$0030,$0300
+	dc.w	$0052,$0044,$0004,$003d,$03c0,$0005,$004b,$0440
+	dc.w	$0060,$0006,$0059,$04c0,$0007,$0067,$0540,$0000
+	dc.w	$003c,$001e,$000f,$0000,$0007,$0340,$0001,$0016
+	dc.w	$0340,$002d,$0002,$0025,$0340,$0003,$0034,$0340
+	dc.w	$005a,$004b,$0004,$0043,$0400,$0005,$0052,$0480
+	dc.w	$0069,$0006,$0061,$0500,$0007,$0070,$0580,$0000
+	dc.w	$0042,$0021,$0010,$0000,$0008,$0380,$0001,$0018
+	dc.w	$0380,$0031,$0002,$0029,$0380,$0003,$0039,$0380
+	dc.w	$0063,$0052,$0004,$004a,$0440,$0005,$005a,$04c0
+	dc.w	$0073,$0006,$006b,$0540,$0007,$007b,$05c0,$0000
+	dc.w	$0049,$0024,$0012,$0000,$0009,$03c0,$0001,$001b
+	dc.w	$03c0,$0036,$0002,$002d,$03c0,$0003,$003f,$03c0
+	dc.w	$006d,$005b,$0004,$0052,$0480,$0005,$0064,$0500
+	dc.w	$007f,$0006,$0076,$0580,$0007,$0088,$0600,$0000
+	dc.w	$0050,$0028,$0014,$0000,$000a,$0400,$0001,$001e
+	dc.w	$0400,$003c,$0002,$0032,$0400,$0003,$0046,$0400
+	dc.w	$0078,$0064,$0004,$005a,$04c0,$0005,$006e,$0540
+	dc.w	$008c,$0006,$0082,$05c0,$0007,$0096,$0640,$0000
+	dc.w	$0058,$002c,$0016,$0000,$000b,$0440,$0001,$0021
+	dc.w	$0440,$0042,$0002,$0037,$0440,$0003,$004d,$0440
+	dc.w	$0084,$006e,$0004,$0063,$0500,$0005,$0079,$0580
+	dc.w	$009a,$0006,$008f,$0600,$0007,$00a5,$0680,$0000
+	dc.w	$0061,$0030,$0018,$0000,$000c,$0480,$0001,$0024
+	dc.w	$0480,$0048,$0002,$003c,$0480,$0003,$0054,$0480
+	dc.w	$0091,$0079,$0004,$006d,$0540,$0005,$0085,$05c0
+	dc.w	$00a9,$0006,$009d,$0640,$0007,$00b5,$06c0,$0000
+	dc.w	$006b,$0035,$001a,$0000,$000d,$04c0,$0001,$0028
+	dc.w	$04c0,$0050,$0002,$0042,$04c0,$0003,$005d,$04c0
+	dc.w	$00a0,$0085,$0004,$0078,$0580,$0005,$0093,$0600
+	dc.w	$00bb,$0006,$00ad,$0680,$0007,$00c8,$0700,$0000
+	dc.w	$0076,$003b,$001d,$0000,$000e,$0500,$0001,$002c
+	dc.w	$0500,$0058,$0002,$0049,$0500,$0003,$0067,$0500
+	dc.w	$00b1,$0093,$0004,$0084,$05c0,$0005,$00a2,$0640
+	dc.w	$00ce,$0006,$00bf,$06c0,$0007,$00dd,$0740,$0000
+	dc.w	$0082,$0041,$0020,$0000,$0010,$0540,$0001,$0030
+	dc.w	$0540,$0061,$0002,$0051,$0540,$0003,$0071,$0540
+	dc.w	$00c3,$00a2,$0004,$0092,$0600,$0005,$00b2,$0680
+	dc.w	$00e3,$0006,$00d3,$0700,$0007,$00f3,$0780,$0000
+	dc.w	$008f,$0047,$0023,$0000,$0011,$0580,$0001,$0035
+	dc.w	$0580,$006b,$0002,$0059,$0580,$0003,$007d,$0580
+	dc.w	$00d6,$00b2,$0004,$00a0,$0640,$0005,$00c4,$06c0
+	dc.w	$00fa,$0006,$00e8,$0740,$0007,$010c,$07c0,$0000
+	dc.w	$009d,$004e,$0027,$0000,$0013,$05c0,$0001,$003a
+	dc.w	$05c0,$0075,$0002,$0062,$05c0,$0003,$0089,$05c0
+	dc.w	$00eb,$00c4,$0004,$00b0,$0680,$0005,$00d7,$0700
+	dc.w	$0112,$0006,$00ff,$0780,$0007,$0126,$0800,$0000
+	dc.w	$00ad,$0056,$002b,$0000,$0015,$0600,$0001,$0040
+	dc.w	$0600,$0081,$0002,$006c,$0600,$0003,$0097,$0600
+	dc.w	$0103,$00d8,$0004,$00c2,$06c0,$0005,$00ed,$0740
+	dc.w	$012e,$0006,$0119,$07c0,$0007,$0144,$0840,$0000
+	dc.w	$00be,$005f,$002f,$0000,$0017,$0640,$0001,$0047
+	dc.w	$0640,$008e,$0002,$0076,$0640,$0003,$00a6,$0640
+	dc.w	$011d,$00ed,$0004,$00d5,$0700,$0005,$0105,$0780
+	dc.w	$014c,$0006,$0134,$0800,$0007,$0164,$0880,$0000
+	dc.w	$00d1,$0068,$0034,$0000,$001a,$0680,$0001,$004e
+	dc.w	$0680,$009c,$0002,$0082,$0680,$0003,$00b6,$0680
+	dc.w	$0139,$0105,$0004,$00eb,$0740,$0005,$011f,$07c0
+	dc.w	$016d,$0006,$0153,$0840,$0007,$0187,$08c0,$0000
+	dc.w	$00e6,$0073,$0039,$0000,$001c,$06c0,$0001,$0056
+	dc.w	$06c0,$00ac,$0002,$008f,$06c0,$0003,$00c9,$06c0
+	dc.w	$0159,$011f,$0004,$0102,$0780,$0005,$013c,$0800
+	dc.w	$0192,$0006,$0175,$0880,$0007,$01af,$0900,$0000
+	dc.w	$00fd,$007e,$003f,$0000,$001f,$0700,$0001,$005e
+	dc.w	$0700,$00bd,$0002,$009e,$0700,$0003,$00dd,$0700
+	dc.w	$017b,$013c,$0004,$011c,$07c0,$0005,$015b,$0840
+	dc.w	$01ba,$0006,$019b,$08c0,$0007,$01da,$0940,$0000
+	dc.w	$0117,$008b,$0045,$0000,$0022,$0740,$0001,$0068
+	dc.w	$0740,$00d1,$0002,$00ae,$0740,$0003,$00f4,$0740
+	dc.w	$01a2,$015c,$0004,$0139,$0800,$0005,$017f,$0880
+	dc.w	$01e8,$0006,$01c5,$0900,$0007,$020b,$0980,$0000
+	dc.w	$0133,$0099,$004c,$0000,$0026,$0780,$0001,$0073
+	dc.w	$0780,$00e6,$0002,$00bf,$0780,$0003,$010c,$0780
+	dc.w	$01cc,$017f,$0004,$0159,$0840,$0005,$01a6,$08c0
+	dc.w	$0219,$0006,$01f2,$0940,$0007,$023f,$09c0,$0000
+	dc.w	$0151,$00a8,$0054,$0000,$002a,$07c0,$0001,$007e
+	dc.w	$07c0,$00fc,$0002,$00d2,$07c0,$0003,$0126,$07c0
+	dc.w	$01f9,$01a5,$0004,$017b,$0880,$0005,$01cf,$0900
+	dc.w	$024d,$0006,$0223,$0980,$0007,$0277,$0a00,$0000
+	dc.w	$0173,$00b9,$005c,$0000,$002e,$0800,$0001,$008b
+	dc.w	$0800,$0116,$0002,$00e7,$0800,$0003,$0144,$0800
+	dc.w	$022c,$01cf,$0004,$01a1,$08c0,$0005,$01fe,$0940
+	dc.w	$0289,$0006,$025a,$09c0,$0007,$02b7,$0a40,$0000
+	dc.w	$0198,$00cc,$0066,$0000,$0033,$0840,$0001,$0099
+	dc.w	$0840,$0132,$0002,$00ff,$0840,$0003,$0165,$0840
+	dc.w	$0264,$01fe,$0004,$01cb,$0900,$0005,$0231,$0980
+	dc.w	$02ca,$0006,$0297,$0a00,$0007,$02fd,$0a80,$0000
+	dc.w	$01c1,$00e0,$0070,$0000,$0038,$0880,$0001,$00a8
+	dc.w	$0880,$0150,$0002,$0118,$0880,$0003,$0188,$0880
+	dc.w	$02a1,$0231,$0004,$01f9,$0940,$0005,$0269,$09c0
+	dc.w	$0311,$0006,$02d9,$0a40,$0007,$0349,$0ac0,$0000
+	dc.w	$01ee,$00f7,$007b,$0000,$003d,$08c0,$0001,$00b9
+	dc.w	$08c0,$0172,$0002,$0134,$08c0,$0003,$01b0,$08c0
+	dc.w	$02e5,$0269,$0004,$022b,$0980,$0005,$02a7,$0a00
+	dc.w	$0360,$0006,$0322,$0a80,$0007,$039e,$0b00,$0000
+	dc.w	$0220,$0110,$0088,$0000,$0044,$0900,$0001,$00cc
+	dc.w	$0900,$0198,$0002,$0154,$0900,$0003,$01dc,$0900
+	dc.w	$0330,$02a8,$0004,$0264,$09c0,$0005,$02ec,$0a40
+	dc.w	$03b8,$0006,$0374,$0ac0,$0007,$03fc,$0b40,$0000
+	dc.w	$0256,$012b,$0095,$0000,$004a,$0940,$0001,$00e0
+	dc.w	$0940,$01c0,$0002,$0175,$0940,$0003,$020b,$0940
+	dc.w	$0381,$02eb,$0004,$02a0,$0a00,$0005,$0336,$0a80
+	dc.w	$0416,$0006,$03cb,$0b00,$0007,$0461,$0b80,$0000
+	dc.w	$0292,$0149,$00a4,$0000,$0052,$0980,$0001,$00f6
+	dc.w	$0980,$01ed,$0002,$019b,$0980,$0003,$023f,$0980
+	dc.w	$03db,$0336,$0004,$02e4,$0a40,$0005,$0388,$0ac0
+	dc.w	$047f,$0006,$042d,$0b40,$0007,$04d1,$0bc0,$0000
+	dc.w	$02d4,$016a,$00b5,$0000,$005a,$09c0,$0001,$010f
+	dc.w	$09c0,$021f,$0002,$01c4,$09c0,$0003,$0279,$09c0
+	dc.w	$043e,$0389,$0004,$032e,$0a80,$0005,$03e3,$0b00
+	dc.w	$04f3,$0006,$0498,$0b80,$0007,$054d,$0c00,$0000
+	dc.w	$031c,$018e,$00c7,$0000,$0063,$0a00,$0001,$012a
+	dc.w	$0a00,$0255,$0002,$01f1,$0a00,$0003,$02b8,$0a00
+	dc.w	$04aa,$03e3,$0004,$037f,$0ac0,$0005,$0446,$0b40
+	dc.w	$0571,$0006,$050d,$0bc0,$0007,$05d4,$0c00,$0000
+	dc.w	$036c,$01b6,$00db,$0000,$006d,$0a40,$0001,$0148
+	dc.w	$0a40,$0291,$0002,$0223,$0a40,$0003,$02fe,$0a40
+	dc.w	$0522,$0447,$0004,$03d9,$0b00,$0005,$04b4,$0b80
+	dc.w	$05fd,$0006,$058f,$0c00,$0007,$066a,$0c00,$0000
+	dc.w	$03c3,$01e1,$00f0,$0000,$0078,$0a80,$0001,$0169
+	dc.w	$0a80,$02d2,$0002,$0259,$0a80,$0003,$034a,$0a80
+	dc.w	$05a4,$04b3,$0004,$043b,$0b40,$0005,$052c,$0bc0
+	dc.w	$0695,$0006,$061c,$0c00,$0007,$070d,$0c00,$0000
+	dc.w	$0424,$0212,$0109,$0000,$0084,$0ac0,$0001,$018d
+	dc.w	$0ac0,$031b,$0002,$0296,$0ac0,$0003,$039f,$0ac0
+	dc.w	$0636,$052d,$0004,$04a8,$0b80,$0005,$05b1,$0c00
+	dc.w	$073f,$0006,$06ba,$0c00,$0007,$07c3,$0c00,$0000
+	dc.w	$048e,$0247,$0123,$0000,$0091,$0b00,$0001,$01b5
+	dc.w	$0b00,$036a,$0002,$02d8,$0b00,$0003,$03fc,$0b00
+	dc.w	$06d5,$05b1,$0004,$051f,$0bc0,$0005,$0643,$0c00
+	dc.w	$07f8,$0006,$0766,$0c00,$0007,$088a,$0c00,$0000
+	dc.w	$0502,$0281,$0140,$0000,$00a0,$0b40,$0001,$01e0
+	dc.w	$0b40,$03c1,$0002,$0321,$0b40,$0003,$0461,$0b40
+	dc.w	$0783,$0642,$0004,$05a2,$0c00,$0005,$06e2,$0c00
+	dc.w	$08c3,$0006,$0823,$0c00,$0007,$0963,$0c00,$0000
+	dc.w	$0583,$02c1,$0160,$0000,$00b0,$0b80,$0001,$0211
+	dc.w	$0b80,$0422,$0002,$0371,$0b80,$0003,$04d2,$0b80
+	dc.w	$0844,$06e3,$0004,$0633,$0c00,$0005,$0794,$0c00
+	dc.w	$09a5,$0006,$08f4,$0c00,$0007,$0a55,$0c00,$0000
+	dc.w	$0610,$0308,$0184,$0000,$00c2,$0bc0,$0001,$0246
+	dc.w	$0bc0,$048c,$0002,$03ca,$0bc0,$0003,$054e,$0bc0
+	dc.w	$0918,$0794,$0004,$06d2,$0c00,$0005,$0856,$0c00
+	dc.w	$0a9c,$0006,$09da,$0c00,$0007,$0b5e,$0c00,$0000
+
+
+*-----------------------------------------------
+*
+*	音程変換したADPCMの総サイズを得る
+*
+*	in : d0.l = 基本となるADPCMデータのサイズ
+*	in : d1.w = 最低の音程
+*	in : d2.w = 変換数-1
+*	out: d0.l = ADPCMの総サイズ
+*
+*-----------------------------------------------
+GetAdpcmSize:
+	movem.l	d1-d6/a0,-(sp)
+	lsl.l	#2,d0
+	move.l	d0,d3
+	move.w	d1,d4
+	move.w	d2,d5
+	moveq.l	#0,d6
+GetAdpcmSizeLoop:
+	move.w	d4,d1
+	neg.w	d1
+	addi.w	#48,d1
+	add.w	d1,d1
+	lea.l	FrequencyTable(pc),a0
+	move.w	(a0,d1.w),d2
+	ext.l	d2
+
+	move.l	d3,d0
+	move.l	d0,d1
+	swap.w	d1
+	mulu.w	d2,d1
+	swap.w	d1
+	clr.w	d1
+	mulu.w	d2,d0
+	add.l	d1,d0
+
+	move.w	#3520,d1
+	move.w	d0,d2
+	clr.w	d0
+	swap.w	d0
+	divu.w	d1,d0
+	swap.w	d0
+	swap.w	d2
+	move.w	d0,d2
+	swap.w	d2
+	divu.w	d1,d2
+	move.w	d2,d0
+	add.l	d0,d6
+
+	addq.w	#1,d4
+	dbra	d5,GetAdpcmSizeLoop
+	move.l	d6,d0
+	lsr.l	#2,d0
+	movem.l	(sp)+,d1-d6/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	PCMの音程変換
+*
+*	in : d0.l = PCMデータのサイズ
+*	in : d1.w = 音程(-48～+48)
+*	in : a0.l = 変換後のPCMデータ格納アドレス
+*	out: d0.l = 変換後のPCMサイズ
+*	out: a0.l = 変換後のPCMデータアドレス
+*
+*-----------------------------------------------
+PitchChange:
+	movem.l	d1-d4/a1-a2,-(sp)
+
+	neg.w	d1
+	addi.w	#48,d1
+	add.w	d1,d1
+	lea.l	FrequencyTable(pc),a1
+	move.w	(a1,d1.w),d1
+	ext.l	d1
+	move.l	d0,d2
+
+	move.l	d0,d3
+	swap.w	d3
+	mulu.w	d1,d3
+	swap.w	d3
+	clr.w	d3
+	mulu.w	d1,d0
+	add.l	d3,d0
+
+	move.w	d0,d3
+	clr.w	d0
+	swap.w	d0
+	divu.w	#3520,d0
+	swap.w	d0
+	swap.w	d3
+	move.w	d0,d3
+	swap.w	d3
+	divu.w	#3520,d3
+	move.w	d3,d0
+	move.l	d0,d3
+
+	move.l	a0,a1
+	move.l	d3,-(sp)
+	SX	__MMChHdlNew
+	addq.l	#4,sp
+	tst.l	d0
+	beq	PitchChangeError
+	movem.l	d0/d3,-(sp)
+	movea.l	d0,a2
+	move.l	(a2),a2
+
+	tst.l	d3
+	beq	PitchChangeExit
+	cmp.l	d2,d3
+	bcc	PitchDown
+PitchUp:
+	swap.w	d1
+	clr.w	d1
+	divu.w	#3520,d1
+	moveq.l	#0,d3
+
+	lsr.l	#1,d2
+	move.l	d2,d4
+	lsr.l	#5,d2
+	andi.w	#$f,d4
+	subi.w	#32,d4
+	neg.w	d4
+	asl.w	#3,d4
+	jmp	PitchUpLoop(pc,d4.w)
+PitchUpLoop:
+	.rept	32
+	move.w	(a1)+,(a2)
+	add.w	d1,d3
+	bcc	@f
+	addq.l	#2,a2
+@@:
+	.endm
+	subq.l	#1,d2
+	bne	PitchUpLoop
+	bra	PitchChangeExit
+
+PitchDown:
+	beq	PitchNormal
+	move.w	#3520,d2
+	swap.w	d2
+	clr.w	d2
+	divu.w	d1,d2
+	moveq.l	#0,d1
+
+	lsr.l	#1,d3
+	move.l	d3,d4
+	lsr.l	#5,d3
+	andi.w	#$f,d4
+	subi.w	#32,d4
+	neg.w	d4
+	asl.w	#3,d4
+	jmp	PitchDownLoop(pc,d4.w)
+PitchDownLoop:
+	.rept	32
+	move.w	(a1),(a2)+
+	add.w	d2,d1
+	bcc.s	@f
+	addq.l	#2,a1
+@@:
+	.endm
+	subq.l	#1,d3
+	bne	PitchDownLoop
+	bra	PitchChangeExit
+
+PitchNormal:
+	lsr.l	#1,d3
+	move.l	d3,d4
+	lsr.l	#5,d3
+	andi.w	#$f,d4
+	subi.w	#32,d4
+	neg.w	d4
+	asl.w	#1,d4
+	jmp	PitchNormalLoop(pc,d4.w)
+PitchNormalLoop:
+	.rept	32
+	move.w	(a1)+,(a2)+
+	.endm
+	subq.l	#1,d3
+	bne	PitchNormalLoop
+	bra	PitchChangeExit
+
+PitchChangeExit:
+	move.l	(sp)+,a0
+	move.l	(sp)+,d0
+	movem.l	(sp)+,d1-d4/a1-a2
+	rts
+
+PitchChangeError:
+	movem.l	(sp)+,d1-d4/a1-a2
+	moveq.l	#-1,d0
+	rts
+
+FrequencyTable:
+	dc.w	00220,00233,00247,00262,00277,00294,00311,00330,00349,00370,00392,00415
+	dc.w	00440,00466,00494,00523,00554,00587,00622,00659,00698,00740,00784,00831
+	dc.w	00880,00932,00988,01047,01109,01175,01245,01319,01397,01480,01568,01661
+	dc.w	01760,01865,01976,02093,02217,02349,02489,02637,02794,02960,03136,03322
+	dc.w	03520,03729,03951,04186,04435,04699,04978,05274,05588,05920,06272,06645
+	dc.w	07040,07459,07902,08372,08870,09397,09956,10548,11175,11840,12544,13290
+	dc.w	14080,14917,15804,16744,17740,18795,19912,21096,22351,23680,25088,26580
+	dc.w	28160,29834,31609,33488,35479,37589,39824,42192,44701,47359,50175,53159
+	dc.w	56320
+
+
+

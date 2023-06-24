@@ -1,0 +1,39 @@
+SHELL = command.x
+
+# コマンド定義
+AS = HAS.X
+#ASFLAGS =
+ASFLAGS = -sNDEBUG -e -u -w0
+LK = HLK.X
+LKFLAGS = -x
+CV = CV.X
+RSIZE = RSIZE.R
+
+OBJS = 	SXPKEY.o PCM.o FILE.o
+
+PROG = ..\SXPKEY
+
+all: $(PROG).R
+
+# 中間生成物の削除
+clean:
+	del	$(PROG).R
+	$(foreach obj,$(OBJS),$(shell del $(obj) > NUL))
+
+# リンク実行
+$(PROG).R:	$(OBJS)
+		$(LK) $(LKFLAGS) $(OBJS) -o $(PROG).X
+		$(CV) $(PROG).X
+		$(RSIZE) $(PROG).R
+		DEL $(PROG).X
+		ren $(PROG).r $(PROG).R
+
+# アセンブル実行
+%.o: %.HAS
+		$(AS)	$(ASFLAGS)	$<
+
+SXPKEY.o:	SXPKEY.HAS SXPKEY.MAC
+PCM.o:		PCM.HAS
+FILE.o:		FILE.HAS
+
+
